@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}그룹 관리 · 음료조사{% endblock %}
+{% block content %}
+<h1>그룹 관리</h1>
+<div class="card">
+  <form method="post" action="/admin/groups" class="row">
+    <input name="name" placeholder="그룹 이름 (예: 코어개발본부, 시스템1팀)" required style="flex:1">
+    <label>상위 그룹
+      <select name="parent_group_id">
+        <option value="">(최상위)</option>
+        {% for g in groups %}<option value="{{ g['id'] }}">{{ g['name'] }}</option>{% endfor %}
+      </select>
+    </label>
+    <button class="primary">만들기</button>
+  </form>
+  <p class="muted">본부 그룹으로 조사를 열면 하위 팀 멤버 전체(중복 제거)가 응답 대상이 됩니다.</p>
+</div>
+
+{% for t in tree %}
+{% set g = t.row %}
+<div class="card" style="margin-left:{{ t.depth * 26 }}px">
+  <form method="post" action="/admin/groups/{{ g['id'] }}" class="row">
+    <b style="min-width:8px">{{ '└' if t.depth else '' }}</b>
+    <input name="name" value="{{ g['name'] }}" required>
+    <label>상위
+      <select name="parent_group_id">
+        <option value="">(최상위)</option>
+        {% for o in groups if o['id'] != g['id'] %}
+        <option value="{{ o['id'] }}" {% if g['parent_group_id']==o['id'] %}selected{% endif %}>{{ o['name'] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <span class="badge">유효 멤버 {{ eff_count[g['id']] }}명</span>
+    <button class="ghost">저장</button>
+  </form>
+  <form method="post" action="/admin/groups/{{ g['id'] }}/members" style="margin-top:8px">
+    <div class="row">
+      {% for u in users %}
+      <label class="chk">
+        <input type="checkbox" name="member_ids" value="{{ u['id'] }}"
+               {% if u['id'] in member_map[g['id']] %}checked{% endif %}>
+        {{ u['name'] }}{% if u['status']=='invited' %}<span class="muted">(초대됨)</span>{% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="ghost">직속 멤버 저장</button>
+    </div>
+  </form>
+  <form method="post" action="/admin/groups/{{ g['id'] }}/delete"
+        onsubmit="return confirm('그룹을 삭제할까요?')" class="inline">
+    <button class="ghost muted">그룹 삭제</button>
+  </form>
+</div>
+{% endfor %}
+{% endblock %}

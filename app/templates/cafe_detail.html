@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ cafe['name'] }} · 음료조사{% endblock %}
+{% block content %}
+<h1>{{ cafe['name'] }}</h1>
+
+<div class="card">
+  <form method="post" action="/cafes/{{ cafe['id'] }}" class="row">
+    <input name="name" value="{{ cafe['name'] }}" required>
+    <input name="menu_url" value="{{ cafe['menu_url'] or '' }}" placeholder="메뉴판 링크" style="flex:1">
+    <label>공통 기본음료
+      <select name="default_menu_id">
+        <option value="">(없음)</option>
+        {% for m in menus if m['is_active'] %}
+        <option value="{{ m['id'] }}" {% if cafe['default_menu_id']==m['id'] %}selected{% endif %}>{{ m['name'] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button>저장</button>
+  </form>
+  <p class="muted">기본음료: 즐겨찾기가 없는 미응답자에게 마감 때 자동 채택되는 메뉴.</p>
+</div>
+
+<h2>메뉴</h2>
+{% for m in menus %}
+<div class="card" {% if not m['is_active'] %}style="opacity:.55"{% endif %}>
+  <form method="post" action="/menus/{{ m['id'] }}">
+    <div class="row">
+      <input name="name" value="{{ m['name'] }}" required>
+      <input name="base_price" type="number" value="{{ m['base_price'] }}" required style="width:110px"> 원
+      <label class="chk"><input type="checkbox" name="is_active" value="1" {% if m['is_active'] %}checked{% endif %}> 판매 중</label>
+      <button>수정</button>
+      {% if m['updated_by'] %}<span class="muted">최근 수정: {{ m['updater_name'] }} {{ m['updated_at'] }}</span>{% endif %}
+    </div>
+    <textarea name="options" rows="2" spellcheck="false">{{ m['options'] }}</textarea>
+  </form>
+</div>
+{% endfor %}
+
+<h2>메뉴 추가</h2>
+<div class="card">
+  <form method="post" action="/cafes/{{ cafe['id'] }}/menus">
+    <div class="row">
+      <input name="name" placeholder="메뉴명" required>
+      <input name="base_price" type="number" placeholder="가격(원)" required style="width:130px">
+      <button class="primary">추가</button>
+    </div>
+    <textarea name="options" rows="2" spellcheck="false" placeholder='옵션 JSON — 예: {{ options_example }}'></textarea>
+    <p class="muted">옵션 형식: [{"name": 그룹명, "required": true/false, "choices": [{"label": 라벨, "delta": 가격증감}]}] — 비우면 옵션 없음</p>
+  </form>
+</div>
+{% endblock %}

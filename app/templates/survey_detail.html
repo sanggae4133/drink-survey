@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}{{ survey['title'] or survey['survey_date'] }} · 음료조사{% endblock %}
+{% block content %}
+<h1>{{ survey['title'] or (survey['survey_date'] ~ ' ' ~ survey['group_name']) }}</h1>
+<p class="muted">
+  {{ survey['group_name'] }} · {{ survey['cafe_name'] }} · 마감 <b>{{ survey['deadline_at'] }}</b>
+  {% if survey['allow_guests'] %} · <span class="badge">게스트 허용</span>{% endif %}
+  &nbsp; <a href="/surveys/{{ survey['id'] }}/summary">현황 집계 보기</a>
+</p>
+{% if can_manage %}
+<form class="inline" method="post" action="/surveys/{{ survey['id'] }}/close"
+      onsubmit="return confirm('지금 마감할까요? 미응답자는 기본음료로 자동 채택됩니다.')">
+  <button>지금 마감</button>
+</form>
+{% endif %}
+
+{% if not is_member %}
+<div class="card muted">이 조사의 대상 그룹 멤버가 아니라서 응답할 수 없습니다 (열람은 가능).</div>
+{% else %}
+
+{% if my_response %}
+<div class="card" style="border-color:var(--ok)">
+  내 선택: <b>{{ item_label(my_response['menu_name'], json_loads(my_response['selected_options'])) }}</b>
+  <span class="num">{{ '{:,}'.format(my_response['final_price']) }}원</span>
+  <span class="muted">— 아래에서 다시 고르면 덮어씁니다</span>
+</div>
+{% elif fav and fav['menu_active'] %}
+<div class="card" style="border-color:var(--accent)">
+  <form method="post" action="/surveys/{{ survey['id'] }}/respond" class="row">
+    <input type="hidden" name="use_default" value="1">
+    <span>내 즐겨찾기: <b>{{ item_label(fav['menu_name'], json_loads(fav['selected_options'])) }}</b></span>
+    <button class="primary">이걸로</button>
+  </form>
+</div>
+{% endif %}
+
+<h2>메뉴 선택</h2>
+{% for m in menus %}
+<div class="card">
+  <form method="post" action="/surveys/{{ survey['id'] }}/respond">
+    <input type="hidden" name="menu_id" value="{{ m.row['id'] }}">
+    <div class="row" style="justify-content:space-between">
+      <b>{{ m.row['name'] }}</b>
+      <span class="num">{{ '{:,}'.format(m.row['base_price']) }}원~</span>
+    </div>
+    {% for g in m.groups %}
+    {% set gi = loop.index0 %}
+    <div class="row" style="margin-top:6px">
+      <span class="muted">{{ g.name }}{% if g.required %}*{% endif %}</span>
+      {% if not g.required %}
+      <label class="chk"><input type="radio" name="opt_{{ gi }}" value="" checked> 없음</label>
+      {% endif %}
+      {% for c in g.choices %}
+      <label class="chk">
+        <input type="radio" name="opt_{{ gi }}" value="{{ c.label }}"
+               {% if g.required and loop.first %}checked{% endif %}>
+        {{ c.label }}{% if c.delta %} ({{ '+' if c.delta > 0 else '' }}{{ '{:,}'.format(c.delta) }}원){% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    <div class="row" style="margin-top:10px">
+      <label class="chk"><input type="checkbox" name="save_default" value="1"> 이 선택을 이 카페 즐겨찾기로</label>
+      <button class="primary">이걸로 주문</button>
+    </div>
+  </form>
+</div>
+{% endfor %}
+
+{% if survey['allow_guests'] %}
+<h2>게스트 잔 추가</h2>
+<div class="card">
+  <form method="post" action="/surveys/{{ survey['id'] }}/guests" class="row">
+    <input name="guest_label" placeholder="표시명 (예: 팀장님 손님)">
+    <select name="guest_menu_id" required>
+      {% for m in menus %}<option value="{{ m.row['id'] }}">{{ m.row['name'] }}</option>{% endfor %}
+    </select>
+    <button>추가</button>
+    <span class="muted">필수 옵션은 기본값으로 들어갑니다. 누가 추가했는지 표시됩니다.</span>
+  </form>
+</div>
+{% endif %}
+{% endif %}
+
+<h2>응답 현황 <span class="muted">{{ summary.persons|length + summary.guests|length }}잔</span></h2>
+<div class="tbl-scroll">
+<table>
+  <tr><th>이름</th><th>선택</th><th class="num">가격</th></tr>
+  {% for p in summary.persons %}
+  <tr><td>{{ p.name }}</td><td>{{ p.item }}</td><td class="num">{{ '{:,}'.format(p.price) }}</td></tr>
+  {% endfor %}
+  {% for g in summary.guests %}
+  <tr>
+    <td>{{ g.label }} <span class="muted">({{ g.added_by }} 추가)</span></td>
+    <td>{{ g.item }}</td>
+    <td class="num">{{ '{:,}'.format(g.price) }}
+      <form class="inline" method="post" action="/surveys/{{ survey['id'] }}/guests/{{ g.id }}/delete">
+        <button class="ghost muted">삭제</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+<p class="muted">미응답 {{ summary.excluded|length }}명: {{ summary.excluded|join(', ') or '없음' }}</p>
+{% endblock %}

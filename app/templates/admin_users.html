@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}회원 관리 · 음료조사{% endblock %}
+{% block content %}
+<h1>회원 관리</h1>
+<div class="card">
+  <form method="post" action="/admin/users" class="row">
+    <input name="email" type="email" placeholder="회사 이메일" required style="flex:1">
+    <input name="name" placeholder="이름" required>
+    <select name="role"><option value="member">member</option><option value="admin">admin</option></select>
+    <button class="primary">사전 등록</button>
+  </form>
+  <p class="muted">등록해 두면 본인이 그 이메일의 구글 계정으로 처음 로그인할 때 계정이 연결(active)됩니다.</p>
+</div>
+<div class="tbl-scroll">
+<table>
+  <tr><th>이름</th><th>이메일</th><th>역할</th><th>상태</th><th></th></tr>
+  {% for u in users %}
+  <tr>
+    <form method="post" action="/admin/users/{{ u['id'] }}">
+    <td><input name="name" value="{{ u['name'] }}" style="width:110px"></td>
+    <td><input name="email" value="{{ u['email'] }}" {% if u['status']=='active' %}readonly style="border:none;background:transparent"{% endif %}></td>
+    <td>
+      <select name="role">
+        <option value="member" {% if u['role']=='member' %}selected{% endif %}>member</option>
+        <option value="admin" {% if u['role']=='admin' %}selected{% endif %}>admin</option>
+      </select>
+    </td>
+    <td>{% if u['status']=='active' %}<span class="badge ok">active</span>{% else %}<span class="badge">invited</span>{% endif %}</td>
+    <td><button class="ghost">저장</button></td>
+    </form>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

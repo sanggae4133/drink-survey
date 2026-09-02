@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}카페 · 음료조사{% endblock %}
+{% block content %}
+<h1>카페</h1>
+<div class="card">
+  <form method="post" action="/cafes" class="row">
+    <input name="name" placeholder="카페 이름" required>
+    <input name="menu_url" placeholder="메뉴판 링크 (선택)" style="flex:1">
+    <button class="primary">등록</button>
+  </form>
+  <p class="muted">카페와 메뉴는 누구나 등록·수정할 수 있습니다.</p>
+</div>
+<div class="tbl-scroll">
+<table>
+  <tr><th>이름</th><th>메뉴</th><th>메뉴판</th><th>등록자</th></tr>
+  {% for c in cafes %}
+  <tr>
+    <td><a href="/cafes/{{ c['id'] }}">{{ c['name'] }}</a></td>
+    <td class="num">{{ c['menu_count'] }}개</td>
+    <td>{% if c['menu_url'] %}<a href="{{ c['menu_url'] }}" target="_blank" rel="noopener">링크</a>{% endif %}</td>
+    <td class="muted">{{ c['creator_name'] }}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

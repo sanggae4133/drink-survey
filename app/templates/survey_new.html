@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}조사 만들기 · 음료조사{% endblock %}
+{% block content %}
+<h1>조사 만들기{% if src %} <span class="badge accent">지난 조사와 같게</span>{% endif %}</h1>
+<div class="card">
+  <form method="post" action="/surveys">
+    <div class="row" style="margin-bottom:10px">
+      <label>일자 <input type="date" name="survey_date" value="{{ today }}" required></label>
+      <label>마감 <input type="time" name="deadline_time" value="10:30" required></label>
+    </div>
+    <div class="row" style="margin-bottom:10px">
+      <label>그룹
+        <select name="group_id" required>
+          {% for g in groups %}
+          <option value="{{ g['id'] }}" {% if src and src['group_id']==g['id'] %}selected{% endif %}>{{ g['name'] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>카페
+        <select name="cafe_id" required>
+          {% for c in cafes %}
+          <option value="{{ c['id'] }}" {% if src and src['cafe_id']==c['id'] %}selected{% endif %}>
+            {{ c['name'] }} (메뉴 {{ c['menu_count'] }})</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="row" style="margin-bottom:10px">
+      <input name="title" placeholder="제목 (예: 9/4 주간회의 — 비우면 자동)" style="flex:1"
+             value="{{ src['title'] if src and src['title'] else '' }}">
+      <label class="chk"><input type="checkbox" name="allow_guests" value="1"
+             {% if src and src['allow_guests'] %}checked{% endif %}> 게스트 잔 허용</label>
+    </div>
+    <button class="primary">조사 시작</button>
+    <span class="muted">매주 반복하려면 <a href="/schedules">스케줄</a>로 등록하세요</span>
+  </form>
+</div>
+{% if not groups %}<p class="muted">그룹이 없습니다 — 관리자가 먼저 그룹을 만들어야 합니다.</p>{% endif %}
+{% if not cafes %}<p class="muted">카페가 없습니다 — <a href="/cafes">카페부터 등록</a>하세요.</p>{% endif %}
+{% endblock %}

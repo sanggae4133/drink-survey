@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}스케줄 · 음료조사{% endblock %}
+{% block content %}
+<h1>반복 스케줄</h1>
+<p class="muted">스케줄 요일 당일, 누군가의 첫 접속이 그 주 조사를 자동 생성합니다.
+마감시각이 지나도록 아무도 접속하지 않은 주는 건너뜁니다.</p>
+
+<div class="card">
+  <form method="post" action="/schedules" class="row">
+    <select name="group_id" required>
+      {% for g in groups %}<option value="{{ g['id'] }}">{{ g['name'] }}</option>{% endfor %}
+    </select>
+    <select name="cafe_id" required>
+      {% for c in cafes %}<option value="{{ c['id'] }}">{{ c['name'] }}</option>{% endfor %}
+    </select>
+    <select name="weekday">
+      {% for w in weekdays %}<option value="{{ loop.index0 }}">{{ w }}요일</option>{% endfor %}
+    </select>
+    <label>마감 <input type="time" name="deadline_time" value="10:30" required></label>
+    <input name="title_pattern" placeholder="제목 패턴 (예: {M/D} 주간회의)">
+    <label class="chk"><input type="checkbox" name="allow_guests" value="1"> 게스트 허용</label>
+    <button class="primary">등록</button>
+  </form>
+</div>
+
+<div class="tbl-scroll">
+{% if scheds %}
+<table>
+  <tr><th>요일·마감</th><th>그룹</th><th>카페</th><th>제목 패턴</th><th>상태</th><th>생성자</th><th></th></tr>
+  {% for s in scheds %}
+  <tr>
+    <td>{{ weekdays[s['weekday']] }} {{ s['deadline_time'] }}</td>
+    <td>{{ s['group_name'] }}</td>
+    <td>{{ s['cafe_name'] }}</td>
+    <td>{{ s['title_pattern'] or '-' }}</td>
+    <td>{% if s['enabled'] %}<span class="badge ok">동작 중</span>{% else %}<span class="badge">중지</span>{% endif %}</td>
+    <td class="muted">{{ s['creator_name'] }}</td>
+    <td>
+      <form class="inline" method="post" action="/schedules/{{ s['id'] }}/toggle">
+        <button class="ghost">{{ '중지' if s['enabled'] else '켜기' }}</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">등록된 스케줄이 없습니다.</p>{% endif %}
+</div>
+{% endblock %}

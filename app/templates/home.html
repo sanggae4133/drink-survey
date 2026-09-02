@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>진행 중인 조사</h1>
+{% if not surveys_open %}
+  <p class="muted">지금 진행 중인 조사가 없습니다. <a href="/surveys/new">새 조사 만들기</a></p>
+{% endif %}
+{% for s in surveys_open %}
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div>
+        <a href="/surveys/{{ s['id'] }}"><b>{{ s['title'] or (s['survey_date'] ~ ' ' ~ s['group_name']) }}</b></a>
+        <div class="muted">{{ s['group_name'] }} · {{ s['cafe_name'] }} · 마감 {{ s['deadline_at'][5:] }}</div>
+      </div>
+      <div>
+        {% if s['my_responded'] %}<span class="badge ok">응답함</span>
+        {% else %}<span class="badge warn">미응답</span>{% endif %}
+        {% if s['schedule_id'] %}<span class="badge">자동 생성</span>{% endif %}
+      </div>
+    </div>
+  </div>
+{% endfor %}
+
+<h2>지난 조사</h2>
+{% if not surveys_closed %}<p class="muted">아직 없습니다.</p>{% endif %}
+<div class="tbl-scroll">
+{% if surveys_closed %}
+<table>
+  <tr><th>일자</th><th>제목</th><th>그룹</th><th>카페</th><th></th></tr>
+  {% for s in surveys_closed %}
+  <tr>
+    <td class="num">{{ s['survey_date'] }}</td>
+    <td><a href="/surveys/{{ s['id'] }}/summary">{{ s['title'] or '-' }}</a></td>
+    <td>{{ s['group_name'] }}</td>
+    <td>{{ s['cafe_name'] }}</td>
+    <td><a href="/surveys/{{ s['id'] }}/clone" class="muted">같게 만들기</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+</div>
+{% endblock %}

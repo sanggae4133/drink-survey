@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}로그인 · 음료조사{% endblock %}
+{% block content %}
+<div style="max-width:380px;margin:60px auto;text-align:center">
+  <h1 style="font-size:28px">☕ 음료조사</h1>
+  <p class="muted">회의 전에 음료 주문을 취합합니다</p>
+  <div class="card">
+    {% if oauth_ready %}
+      <a href="/auth/google"><button class="primary" style="width:100%">구글 계정으로 로그인</button></a>
+      <p class="muted">사전 등록된 회사 계정만 로그인할 수 있습니다</p>
+    {% else %}
+      <p class="muted">구글 OAuth가 아직 설정되지 않았습니다 (.env의 GOOGLE_CLIENT_ID/SECRET)</p>
+    {% endif %}
+    {% if dev_login %}
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+      <form method="post" action="/auth/dev" class="row" style="justify-content:center">
+        <input name="email" placeholder="dev: 등록된 이메일" required style="flex:1">
+        <button>dev 로그인</button>
+      </form>
+      <p class="muted">DEV_LOGIN=1 개발 모드 전용</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
