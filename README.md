@@ -22,7 +22,7 @@ bash run.sh                             # http://127.0.0.1:8080
 ## 스모크 테스트
 
 ```bash
-python smoke_test.py        # 21개 체크: 로그인·트리·응답·게스트·lazy 마감·자동 채택·스케줄
+python smoke_test.py        # 22개 체크: 로그인·트리·응답·게스트·lazy 마감·자동 채택·스케줄
 ```
 
 ## 구조
@@ -44,6 +44,8 @@ seed.py              초기 관리자·데모 데이터
 ```
 
 ## 핵심 설계 (설계서와 일치)
+
+> 상세: [docs/architecture.md](docs/architecture.md) · [docs/design.md](docs/design.md) · [docs/implementation.md](docs/implementation.md)
 
 - **회원**: 관리자가 이메일로 사전 등록 → 본인 최초 구글 로그인 때 `google_sub` 바인딩(active).
   미등록 이메일·다른 계정 바인딩 시도는 거절.
