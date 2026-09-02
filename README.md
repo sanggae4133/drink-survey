@@ -6,6 +6,10 @@
 ## 빠른 시작 (로컬/개발)
 
 ```bash
+# 파이썬 가상환경 설정
+python3 -m venv .venv
+source .venv/bin/activate
+
 pip install -r requirements.txt        # 파이에선 --break-system-packages 필요할 수 있음
 cp .env.example .env                    # DEV_LOGIN=1 이 켜져 있음
 python seed.py --admin-email you@company.co.kr --admin-name 당신이름 --demo
