@@ -18,7 +18,7 @@
 
 | 구성 요소 | 역할 | 비고 |
 |---|---|---|
-| Tailscale Funnel | 공개 HTTPS URL, TLS 종단 | 앱까지는 http. 그래서 세션 쿠키 `https_only=False` |
+| Tailscale Funnel | 공개 HTTPS URL, TLS 종단, 대역폭 제한 | 앱까지는 http. 세션 쿠키 `Secure`는 브라우저 기준이라 운영에서 켠다 |
 | uvicorn | ASGI 서버 | systemd로 상주. 워커 1개 |
 | FastAPI | 라우팅, 폼 파싱, 의존성 주입 | JSON API 없음. 전부 HTML 폼 POST → 303 리다이렉트 |
 | Jinja2 | 서버 렌더 | JS는 주문 텍스트 복사 버튼 하나 |

@@ -109,7 +109,7 @@ run.sh             .env 로드 후 uvicorn
 | `SESSION_SECRET` | `dev-secret-change-me` | 세션 쿠키 서명. 운영은 반드시 교체 |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | 빈 값 | 둘 다 있어야 구글 로그인 버튼 활성 |
 | `ALLOWED_DOMAIN` | 빈 값 | 설정 시 이 도메인 이메일만 허용 + 구글 `hd` 힌트 |
-| `DEV_LOGIN` | `0` | `1`이면 dev 로그인 폼 노출. 운영은 0 |
+| `DEV_LOGIN` | `0` | `1`이면 dev 로그인 폼 노출 + `/docs` 활성 + 세션 쿠키 `Secure` 해제. 운영은 0 |
 | `PORT` | `8080` | run.sh만 사용 |
 
 `config.py`는 import 시점에 환경변수를 읽는다. 테스트가 `os.environ`을 먼저 세팅한 뒤 `app.main`을 import하는 이유.

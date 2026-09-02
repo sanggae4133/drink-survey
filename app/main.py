@@ -6,13 +6,16 @@ from . import config
 from .db import init_db
 from .routers import admin, auth, cafes, home, me, schedules, surveys
 
-app = FastAPI(title="음료조사", docs_url="/docs")
+# 운영(DEV_LOGIN=0)에서는 /docs, /redoc, /openapi.json 전부 비활성 — 비로그인 공개 경로를 최소화
+app = FastAPI(title="음료조사", openapi_url="/openapi.json" if config.DEV_LOGIN else None)
 
 app.add_middleware(
     SessionMiddleware,
     secret_key=config.SESSION_SECRET,
     same_site="lax",
-    https_only=False,  # Funnel이 TLS 종단이라 앱까지는 http로 온다
+    # Secure 플래그는 브라우저가 자기 연결(https, Funnel) 기준으로 판단하므로 운영에서는 True.
+    # 개발(DEV_LOGIN=1)은 http://127.0.0.1 이라 False.
+    https_only=not config.DEV_LOGIN,
 )
 
 init_db()

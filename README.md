@@ -74,7 +74,7 @@ After=network.target
 [Service]
 WorkingDirectory=/home/pi/drink-survey
 EnvironmentFile=/home/pi/drink-survey/.env
-ExecStart=/usr/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080
+ExecStart=/usr/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --limit-concurrency 32 --timeout-keep-alive 5
 Restart=always
 User=pi
 
@@ -89,8 +89,14 @@ sudo systemctl enable --now drink-survey
 ```bash
 sudo tailscale funnel --bg 8080
 ```
-그러면 `https://<기기명>.<tailnet>.ts.net` 공개 URL이 뜬다(TLS 자동). Funnel이 TLS를 종단하고
-앱에는 http로 넘기므로 세션 쿠키는 `https_only=False`로 둔다.
+그러면 `https://<기기명>.<tailnet>.ts.net` 공개 URL이 뜬다(TLS 자동).
+
+### 보안 체크리스트
+- `.env`: `SESSION_SECRET` 무작위 값, `DEV_LOGIN=0`, `ALLOWED_DOMAIN` 설정. 셋 중 하나라도 빠지면 로그인 벽이 무의미해진다.
+- `DEV_LOGIN=0`이면 `/docs`·`/openapi.json`이 꺼지고 세션 쿠키에 `Secure`가 붙는다. 비로그인 공개 경로는 `/login`, `/auth/*`, `/logout`만 남는다.
+- uvicorn `--limit-concurrency 32 --timeout-keep-alive 5`: Pi가 느린 연결 붙잡기에 버티도록.
+- `.ts.net` 도메인은 인증서 투명성 로그에 올라가 봇이 찾아온다. "비공개 URL"이 아니다.
+- 인터넷 노출 자체를 없애려면 Funnel 대신 `tailscale serve`(tailnet 내부 전용). 단, 부서원 전원이 Tailscale을 써야 한다.
 
 > ⚠️ Funnel URL은 부서에만 공유해도 기술적으로는 공개 URL이다. 로그인(구글, 회사 도메인 한정)이
 > 그 앞을 막는 실질적 접근 제어다. 사내망에 상시 외부 터널을 두는 구성이니 보안 정책은 별도 확인 권장.
