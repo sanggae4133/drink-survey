@@ -37,12 +37,13 @@ run.sh             .env 로드 후 uvicorn
 | `user_visible_group_ids(db, uid)` | 직속 소속 그룹 + 조상 id 목록 (재귀 CTE, 위로) | 홈 |
 | `creates_cycle(db, gid, new_parent)` | new_parent가 gid 자신·자손이면 True | 그룹 상위 변경 |
 | `group_tree(db)` | `[{row, depth}]` 트리 순서 평탄화 | 그룹 관리 화면 |
-| `compute_price(menu, sel)` | `base_price + Σ delta` | 응답, 게스트, 자동 채택 |
+| `compute_price(menu, sel)` | `base_price + Σ delta_price` | 응답, 게스트, 자동 채택 |
 | `default_selection(menu)` | 필수 옵션 그룹마다 첫 선택지 | 게스트 잔, 카페 기본음료 자동 채택 |
 | `close_survey(db, sid, due_only=True)` | CAS로 closed 전환, 성공 시 `_autofill`. `due_only=False`면 수동 즉시 마감 | 홈·상세·응답·게스트·주문서 진입, 수동 마감 |
 | `_autofill(db, sid)` | 미응답 active 멤버에 즐겨찾기 → 기본음료 → 제외 순으로 `is_auto=1` 응답 INSERT | `close_survey` 안에서만 |
 | `generate_due_surveys(db)` | 오늘 요일 스케줄 → stale skip → `INSERT OR IGNORE` | 홈 |
 | `build_summary(db, sid)` | 주문서 dict (combos, persons, guests, 합계, excluded, copy_text) | 상세 화면 현황, 주문서 화면 |
+| `survey_title(row)` | 제목 없으면 `날짜(요일) 그룹명`. Jinja 전역으로도 등록(deps.py) | 홈·상세·주문서 템플릿, copy_text |
 
 `_autofill`은 `close_survey`의 `with db:` 트랜잭션 안에서 실행된다. 자동 채택 중 예외가 나면 마감도 롤백된다(다음 접근이 다시 시도).
 
@@ -65,8 +66,8 @@ run.sh             .env 로드 후 uvicorn
 | GET `/surveys/{id}/summary` | 로그인 | lazy 마감 → `build_summary`. open이면 "진행 중" 배지 | |
 | GET/POST `/cafes` | 로그인 | 목록 / 등록. `menu_url`은 http(s)만 | `/cafes/{id}` |
 | GET/POST `/cafes/{id}` | 로그인 | 상세·메뉴 목록 / 이름·링크·기본음료 수정 | |
-| POST `/cafes/{id}/menus` | 로그인 | 옵션 JSON 검증 후 INSERT | `/cafes/{id}` |
-| POST `/menus/{id}` | 로그인 | 검증 후 UPDATE + updated_by/at | `/cafes/{cafe}` |
+| POST `/cafes/{id}/menus` | 로그인 | 옵션 UI 필드 → JSON 조립·검증 후 INSERT | `/cafes/{id}` |
+| POST `/menus/{id}` | 로그인 | 같은 조립·검증 후 UPDATE + updated_by/at | `/cafes/{cafe}` |
 | GET/POST `/schedules` | 로그인 / 대상 그룹 유효 멤버 또는 admin | 목록 / 등록 | |
 | POST `/schedules/{id}/toggle` | 생성자·admin | enabled 반전 | |
 | GET `/me` | 로그인 | 내 즐겨찾기 목록 | |
@@ -89,6 +90,8 @@ run.sh             .env 로드 후 uvicorn
 | 체크박스 (`allow_guests`, `is_active`, `save_default`, `use_default`) | 체크 시 `"1"`, 아니면 필드 없음 | `str = Form("")` 후 truthy 검사 |
 | 선택 없음을 허용하는 select (`parent_group_id`, `default_menu_id`) | `""` = 없음 | `str = Form("")` 후 `int(v) if v else None` |
 | 옵션 라디오 | `opt_{i}` (i = 옵션 그룹 인덱스), 값은 `choices[].label`, 비필수는 `""`이 "없음" | `_parse_selection`이 메뉴 정의와 대조. 정의에 없는 값은 거절 |
+| 기타 요청 (`note`) | 자유 텍스트, 100자 | 응답·게스트 잔에 저장. 집계 합산엔 안 섞고 개인별·복사 텍스트에 `* 이름: 요청` |
+| 옵션 편집 UI (메뉴 추가/수정) | `g{i}_name`, `g{i}_required`, `g{i}_label[]`, `g{i}_price[]` | `cafes._options_from_form`이 JSON으로 조립 → `parse_option_groups` 검증. 빈 라벨 행 무시, 인덱스 공백 허용(그룹 삭제) |
 | 다중 체크박스 (`member_ids`) | 같은 이름 여러 개 | `await request.form()` → `getlist` |
 
 옵션 라디오가 인덱스 기반인 이유: 옵션 그룹 이름에 어떤 문자가 와도 폼 이름이 깨지지 않게. 대조는 서버가 메뉴 JSON을 다시 파싱해서 한다.
@@ -99,6 +102,8 @@ run.sh             .env 로드 후 uvicorn
   컨텍스트에 `user`가 없으면(로그인 화면) nav를 그리지 않는다.
 - `render(request, name, **ctx)`가 `flash`를 세션에서 pop해 넣는다. 라우터에서 `user=user`는 직접 넘겨야 한다.
 - `survey_detail.html`은 `item_label`, `json_loads`를 컨텍스트로 받아 템플릿 안에서 호출한다. 필터 등록 대신 함수 주입.
+- `cafe_detail.html`의 옵션 편집기는 Jinja 매크로(`opt_group`, `opt_row`)로 그리고, 같은 매크로를 `i='{i}'`로 렌더한 `<template>`을
+  JS가 `replaceAll('{i}', 인덱스)`로 복제한다. 마크업이 한 곳에만 있다. 새 그룹 인덱스는 기존 최댓값+1.
 - 테이블은 `.tbl-scroll`로 감싸 모바일에서 가로 스크롤.
 - 숫자는 `'{:,}'.format(n)` 으로 천 단위 콤마, `.num` 클래스로 tabular-nums.
 
@@ -121,7 +126,7 @@ run.sh             .env 로드 후 uvicorn
 DEV_LOGIN=1 python smoke_test.py
 ```
 
-- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 32 체크, 약 1초.
+- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 40 체크, 약 1초.
 - 단위 테스트 프레임워크 없음. `ok(cond, msg)` 하나. 실패하면 첫 실패에서 `AssertionError`로 멈춘다.
 - 시간 의존 테스트(마감, 스케줄)는 DB의 `deadline_at`을 직접 과거로 UPDATE해서 트리거한다.
 - 구글 OAuth 콜백은 테스트 안 함. dev 로그인이 같은 `invited→active` 경로를 탄다.
@@ -137,6 +142,7 @@ DEV_LOGIN=1 python smoke_test.py
 | 홈 정렬·노출 조건 | `routers/home.py` SQL. 현재: 진행 중은 그룹명 → 날짜, 지난 건 최신 10개 |
 | 주문서 텍스트 포맷 | `services.build_summary`의 `lines` |
 | 게스트 잔에 옵션 선택 추가 | `survey_detail.html` 게스트 폼에 라디오 추가 + `add_guest`에서 `default_selection` 대신 `_parse_selection` 사용 |
+| 옵션 편집기에 항목 추가(예: 선택지 설명) | `cafe_detail.html`의 `opt_row` 매크로 + `cafes._options_from_form` + `models.OptionChoice` 세 곳 |
 | 새 권한 규칙 | 라우터 핸들러 상단. `_can_manage` 패턴 참고 |
 | 스케줄러 도입(리마인더 등) | `close_survey`/`generate_due_surveys`는 이미 순수 함수라 그대로 호출 가능. 트리거만 추가 |
 | 시간대 지원 | 전 컬럼이 로컬 문자열이라 큰 변경. 그 전에 정말 필요한지부터 |

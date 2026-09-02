@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from .. import models, services
+from datetime import datetime
+
 from ..db import db_dep, now_min, now_str
 from ..deps import current_user, flash, render
 
@@ -20,6 +22,11 @@ def _get_survey(db, sid: int) -> sqlite3.Row:
     if s is None:
         raise HTTPException(404, "조사를 찾을 수 없습니다")
     return s
+
+
+def _note(form) -> str | None:
+    """기타 요청(서술형). 100자로 자른다 — 주문서에 한 줄로 들어가야 하니."""
+    return (form.get("note") or "").strip()[:100] or None
 
 
 def _can_manage(user, survey) -> bool:
@@ -39,7 +46,7 @@ def _parse_selection(menu: sqlite3.Row, form) -> list[dict]:
         choice = next((c for c in g.choices if c.label == v), None)
         if choice is None:
             raise ValueError(f"'{g.name}'에 없는 선택지입니다")
-        sel.append({"name": g.name, "choice": choice.label, "delta": choice.delta})
+        sel.append({"name": g.name, "choice": choice.label, "delta_price": choice.delta_price})
     return sel
 
 
@@ -75,6 +82,11 @@ def create_survey(request: Request,
         flash(request, "자기가 속한 그룹(또는 그 상위 그룹)에만 조사를 열 수 있습니다")
         return RedirectResponse("/surveys/new", status_code=303)
     deadline_at = f"{survey_date} {deadline_time}"
+    try:
+        datetime.strptime(deadline_at, "%Y-%m-%d %H:%M")  # 형식이 깨지면 문자열 비교·요일 계산이 전부 틀어진다
+    except ValueError:
+        flash(request, "날짜·시각 형식이 잘못됐습니다")
+        return RedirectResponse("/surveys/new", status_code=303)
     if deadline_at <= now_min():
         flash(request, "마감 시각이 이미 지났습니다")
         return RedirectResponse("/surveys/new", status_code=303)
@@ -158,24 +170,25 @@ async def respond(sid: int, request: Request, user: sqlite3.Row = Depends(curren
 
     price = services.compute_price(menu, sel)
     sel_json = json.dumps(sel, ensure_ascii=False)
+    note = _note(form)
     with db:
         cur = db.execute(
-            "UPDATE survey_responses SET menu_id=?, selected_options=?, final_price=?, is_auto=0, updated_at=? "
+            "UPDATE survey_responses SET menu_id=?, selected_options=?, final_price=?, note=?, is_auto=0, updated_at=? "
             "WHERE survey_id=? AND participant_user_id=?",
-            (menu["id"], sel_json, price, now_str(), sid, user["id"]))
+            (menu["id"], sel_json, price, note, now_str(), sid, user["id"]))
         if cur.rowcount == 0:
             db.execute(
                 "INSERT INTO survey_responses "
-                "(survey_id, participant_user_id, menu_id, selected_options, final_price, created_by) "
-                "VALUES (?,?,?,?,?,?)",
-                (sid, user["id"], menu["id"], sel_json, price, user["id"]))
+                "(survey_id, participant_user_id, menu_id, selected_options, final_price, note, created_by) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (sid, user["id"], menu["id"], sel_json, price, note, user["id"]))
         if form.get("save_default"):
             db.execute(
-                "INSERT INTO user_cafe_defaults (user_id, cafe_id, menu_id, selected_options) "
-                "VALUES (?,?,?,?) "
+                "INSERT INTO user_cafe_defaults (user_id, cafe_id, menu_id, selected_options, note) "
+                "VALUES (?,?,?,?,?) "
                 "ON CONFLICT(user_id, cafe_id) DO UPDATE SET menu_id=excluded.menu_id, "
-                "selected_options=excluded.selected_options",
-                (user["id"], survey["cafe_id"], menu["id"], sel_json))
+                "selected_options=excluded.selected_options, note=excluded.note",
+                (user["id"], survey["cafe_id"], menu["id"], sel_json, note))
     flash(request, f"저장됨: {models.item_label(menu['name'], sel)} {price:,}원")
     return RedirectResponse(f"/surveys/{sid}", status_code=303)
 
@@ -203,14 +216,14 @@ async def add_guest(sid: int, request: Request, user: sqlite3.Row = Depends(curr
         flash(request, str(e) or "입력이 잘못됐습니다")
         return RedirectResponse(f"/surveys/{sid}", status_code=303)
 
-    label = (form.get("guest_label") or "").strip() or "게스트"
+    label = (form.get("guest_label") or "").strip()[:40] or "게스트"
     with db:
         db.execute(
             "INSERT INTO survey_responses "
-            "(survey_id, guest_label, menu_id, selected_options, final_price, created_by) "
-            "VALUES (?,?,?,?,?,?)",
+            "(survey_id, guest_label, menu_id, selected_options, final_price, note, created_by) "
+            "VALUES (?,?,?,?,?,?,?)",
             (sid, label, menu["id"], json.dumps(sel, ensure_ascii=False),
-             services.compute_price(menu, sel), user["id"]))
+             services.compute_price(menu, sel), _note(form), user["id"]))
     flash(request, f"게스트 잔 추가됨: {label}")
     return RedirectResponse(f"/surveys/{sid}", status_code=303)
 

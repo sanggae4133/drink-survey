@@ -11,7 +11,7 @@
 | 그룹 (group) | 본부·팀 같은 조직 단위. 트리 구조 |
 | 유효 멤버 | 어떤 그룹의 직속 멤버 ∪ 모든 하위 그룹 멤버 (중복 제거). 조사 대상이 되는 사람들 |
 | 카페 / 메뉴 | 주문 대상. 메뉴는 기본가 + 옵션 그룹 JSON |
-| 즐겨찾기 (user_cafe_default) | 사람 × 카페별 기본 음료 스냅샷 |
+| 즐겨찾기 (user_cafe_default) | 사람 × 카페별 기본 음료 스냅샷 (옵션 + 기타 요청) |
 | 조사 (survey) | 특정 날짜·그룹·카페에 대한 주문 취합. `open` → `closed` |
 | 응답 (survey_response) | 잔 하나. 본인 잔(participant_user_id) 또는 게스트 잔(guest_label) |
 | 스케줄 (survey_schedule) | 매주 요일마다 조사를 자동 생성하는 규칙 |
@@ -120,7 +120,7 @@ DDL은 `app/schema.sql` 하나가 원본이다. 여기서는 제약이 담당하
 ```
 
 - stale skip 이유: 마감이 지난 뒤 첫 접속이 조사를 만들면, 그 즉시 닫히고 전원 자동 채택된 "유령 주문서"가 생긴다.
-- `title_pattern`의 `{M/D}`는 `9/2` 같은 오늘 날짜로 치환. 비우면 제목 NULL → 화면에서 `날짜 그룹명`으로 표시.
+- `title_pattern`의 `{M/D}`는 `9/4(월)` 같은 오늘 날짜(요일)로 치환. 비우면 제목 NULL → 화면에서 `2026-09-07(월) 시스템1팀`처럼 표시(`services.survey_title`).
 - 스케줄은 삭제하지 않고 `enabled` 토글만 한다. 과거 조사가 `schedule_id`로 참조하기 때문.
 
 ### R5. 1인 1잔, 게스트 잔은 별도
@@ -132,7 +132,7 @@ DDL은 `app/schema.sql` 하나가 원본이다. 여기서는 제약이 담당하
 
 ### R6. 가격은 응답 시점 스냅샷
 
-`survey_responses.final_price` = 응답 시점의 `base_price + Σ delta`. `selected_options`도 라벨·delta를 통째로 저장.
+`survey_responses.final_price` = 응답 시점의 `base_price + Σ delta_price`. `selected_options`도 라벨·delta_price를 통째로 저장.
 이후 메뉴 가격이나 옵션이 바뀌어도 과거 주문서 금액은 변하지 않는다.
 즐겨찾기(`user_cafe_defaults.selected_options`)도 스냅샷이지만, 자동 채택 시 가격은 **그 시점 메뉴 기준으로 재계산**한다.
 
@@ -142,23 +142,31 @@ DDL은 `app/schema.sql` 하나가 원본이다. 여기서는 제약이 담당하
 삭제는 없고 `is_active=0`(판매 중지). 과거 응답이 참조하기 때문.
 카페 공통 기본음료는 그 카페의 `is_active` 메뉴만 지정 가능.
 
-## 메뉴 옵션 JSON
+## 메뉴 옵션 JSON (저장 형식)
+
+사용자는 JSON을 보지 않는다. 카페 화면의 옵션 편집기(그룹 → 선택지 행)로 입력하고, 서버가 아래 형식으로 조립해 저장한다.
 
 ```json
 [
   {"name": "온도", "required": true,
-   "choices": [{"label": "HOT", "delta": 0}, {"label": "ICE", "delta": 0}]},
+   "choices": [{"label": "HOT", "delta_price": 0}, {"label": "ICE", "delta_price": 0}]},
   {"name": "샷 추가",
-   "choices": [{"label": "+1샷", "delta": 500}]}
+   "choices": [{"label": "+1샷", "delta_price": 500}]}
 ]
 ```
 
 - `required: true` → 응답 시 반드시 하나 선택. 자동 채택·게스트 잔에서는 첫 선택지.
 - `required: false`(기본) → "없음" 선택 가능.
-- `delta` → 가격 증감(원). 음수 가능.
+- `delta_price` → 가격 증감(원). 음수 가능.
 - 검증은 pydantic(`models.OptionGroup`). 메뉴 등록·수정 시 통과 못 하면 예시와 함께 거절.
 
-응답에 저장되는 스냅샷은 `[{"name": "온도", "choice": "ICE", "delta": 0}, ...]`.
+응답에 저장되는 스냅샷은 `[{"name": "온도", "choice": "ICE", "delta_price": 0}, ...]`.
+
+### 기타 요청 (note)
+
+옵션으로 표현하기 애매한 것("얼음 적게", "시럽 빼고")은 응답마다 자유 텍스트 `note`(100자)로 받는다. 모든 메뉴에 기본으로 있다.
+집계에서 **메뉴×옵션 합산에는 섞지 않고**(그래야 "아메리카노 ICE x3"이 합쳐진다) 개인별 목록과 복사 텍스트에 `* 이름: 요청` 줄로 붙인다.
+"즐겨찾기로 저장"을 켜면 note도 함께 저장되어 원터치 응답과 자동 채택에 그대로 쓰인다(원터치 폼에 미리 채워지고 수정 가능).
 집계 키는 `(menu_id, 스냅샷을 sort_keys로 직렬화한 문자열)` → 같은 메뉴·같은 옵션 조합이 한 줄로 합쳐진다.
 
 ## 화면 흐름

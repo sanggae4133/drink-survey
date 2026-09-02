@@ -22,7 +22,7 @@ bash run.sh                             # http://127.0.0.1:8080
 ## 스모크 테스트
 
 ```bash
-python smoke_test.py        # 32개 체크: 로그인·트리·응답·게스트·lazy 마감·자동 채택·스케줄
+python smoke_test.py        # 40개 체크: 로그인·트리·응답·게스트·lazy 마감·자동 채택·스케줄
 ```
 
 ## 구조

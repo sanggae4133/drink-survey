@@ -98,10 +98,10 @@ admin     → 위 전부 + 회원 사전 등록·수정, 그룹 트리·멤버 �
 |---|---|
 | 세션 쿠키 위조 | itsdangerous 서명. 운영에서 기본 시크릿이면 기동 거부 |
 | CSRF | 쿠키 `SameSite=Lax` + 상태 변경은 전부 POST. 토큰 없음 |
-| XSS | Jinja2 자동 이스케이프. `menu_url`은 `http(s)://`만 허용(`javascript:` 차단) |
+| XSS | Jinja2 자동 이스케이프. `menu_url`은 `http(s)://`만 허용(`javascript:` 차단). 사용자 데이터는 인라인 JS 문자열에 넣지 않고 `data-*` 속성으로 |
 | SQL 인젭션 | 전부 파라미터 바인딩. f-string은 `?` 개수 생성에만 |
 | 클릭재킹·MIME 스니핑 | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, 운영 HSTS |
-| 거대 요청 | Content-Length 64KB 초과 413. 옵션 JSON은 그룹·선택지 20개, 이름 40자 상한 |
+| 거대 요청·깨진 입력 | Content-Length 64KB 초과 413. 옵션은 그룹·선택지 20개, 이름 40자, 금액 ±100만 원. 날짜·시각은 형식 검증 후 저장 |
 | 퇴사자 접근 | `status='disabled'` → `current_user`가 매 요청 거절 |
 | 관리자 잠금 | 자기 자신의 admin 해제·비활성화 불가 |
 | 라우트 노출 | 운영에서 `/docs`, `/openapi.json` 비활성. `--no-server-header` |

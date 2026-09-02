@@ -12,6 +12,17 @@ from . import models
 from .db import now_min, now_str
 
 
+KR_WEEKDAYS = "월화수목금토일"
+
+
+def survey_title(survey) -> str:
+    """제목이 없으면 '2026-09-07(월) 시스템1팀'. 화면·주문서 텍스트가 전부 이걸 쓴다."""
+    if survey["title"]:
+        return survey["title"]
+    wd = KR_WEEKDAYS[datetime.strptime(survey["survey_date"], "%Y-%m-%d").weekday()]
+    return f"{survey['survey_date']}({wd}) {survey['group_name']}"
+
+
 # ---------------------------------------------------------------- 그룹 트리
 
 def effective_members(db: sqlite3.Connection, group_id: int) -> list[sqlite3.Row]:
@@ -96,7 +107,7 @@ def group_tree(db: sqlite3.Connection) -> list[dict]:
 # ---------------------------------------------------------------- 가격/옵션
 
 def compute_price(menu: sqlite3.Row, selected: list[dict]) -> int:
-    return menu["base_price"] + sum(int(s.get("delta", 0)) for s in selected)
+    return menu["base_price"] + sum(int(s.get("delta_price", 0)) for s in selected)
 
 
 def default_selection(menu: sqlite3.Row) -> list[dict]:
@@ -106,7 +117,7 @@ def default_selection(menu: sqlite3.Row) -> list[dict]:
     for g in groups:
         if g.required:
             c = g.choices[0]
-            sel.append({"name": g.name, "choice": c.label, "delta": c.delta})
+            sel.append({"name": g.name, "choice": c.label, "delta_price": c.delta_price})
     return sel
 
 
@@ -146,7 +157,7 @@ def _autofill(db: sqlite3.Connection, survey_id: int) -> None:
     for m in effective_members(db, survey["group_id"]):
         if m["id"] in responded or m["status"] != "active":
             continue
-        menu, sel = None, []
+        menu, sel, note = None, [], None
         fav = db.execute(
             "SELECT * FROM user_cafe_defaults WHERE user_id=? AND cafe_id=?",
             (m["id"], survey["cafe_id"]),
@@ -156,7 +167,7 @@ def _autofill(db: sqlite3.Connection, survey_id: int) -> None:
                 "SELECT * FROM menus WHERE id=? AND is_active=1", (fav["menu_id"],)
             ).fetchone()
             if cand:
-                menu, sel = cand, json.loads(fav["selected_options"])
+                menu, sel, note = cand, json.loads(fav["selected_options"]), fav["note"]
         if menu is None and cafe["default_menu_id"]:
             cand = db.execute(
                 "SELECT * FROM menus WHERE id=? AND is_active=1", (cafe["default_menu_id"],)
@@ -167,10 +178,10 @@ def _autofill(db: sqlite3.Connection, survey_id: int) -> None:
             continue  # ③ 제외
         db.execute(
             "INSERT INTO survey_responses "
-            "(survey_id, participant_user_id, menu_id, selected_options, final_price, is_auto, created_by) "
-            "VALUES (?,?,?,?,?,1,?)",
+            "(survey_id, participant_user_id, menu_id, selected_options, final_price, note, is_auto, created_by) "
+            "VALUES (?,?,?,?,?,?,1,?)",
             (survey_id, m["id"], menu["id"], json.dumps(sel, ensure_ascii=False),
-             compute_price(menu, sel), m["id"]),
+             compute_price(menu, sel), note, m["id"]),
         )
 
 
@@ -195,7 +206,8 @@ def generate_due_surveys(db: sqlite3.Connection) -> None:
             continue  # stale skip
         title = None
         if s["title_pattern"]:
-            title = s["title_pattern"].replace("{M/D}", f"{today.month}/{today.day}")
+            md = f"{today.month}/{today.day}({KR_WEEKDAYS[weekday]})"  # 9/4(월)
+            title = s["title_pattern"].replace("{M/D}", md)
         with db:
             db.execute(
                 "INSERT OR IGNORE INTO surveys "
@@ -238,12 +250,12 @@ def build_summary(db: sqlite3.Connection, survey_id: int) -> dict:
         if r["participant_user_id"] is not None:
             participant_ids.add(r["participant_user_id"])
             persons.append({
-                "name": r["participant_name"], "item": label,
+                "name": r["participant_name"], "item": label, "note": r["note"],
                 "price": r["final_price"], "is_auto": bool(r["is_auto"]),
             })
         else:
             guests.append({
-                "id": r["id"], "label": r["guest_label"] or "게스트",
+                "id": r["id"], "name": r["guest_label"] or "게스트", "note": r["note"],
                 "added_by": r["creator_name"], "item": label, "price": r["final_price"],
                 "created_by": r["created_by"],
             })
@@ -257,8 +269,9 @@ def build_summary(db: sqlite3.Connection, survey_id: int) -> dict:
     excluded = [m["name"] for m in members if m["id"] not in participant_ids]
     auto_count = sum(1 for p in persons if p["is_auto"])
 
-    lines = [f"[{survey['title'] or survey['survey_date'] + ' ' + survey['group_name']}] {survey['cafe_name']}"]
+    lines = [f"[{survey_title(survey)}] {survey['cafe_name']}"]
     lines += [f"- {c['label']} x{c['qty']}" for c in combo_list]
+    lines += [f"* {p['name']}: {p['note']}" for p in persons + guests if p["note"]]  # 기타 요청
     lines.append(f"합계 {total_qty}잔 {total_price:,}원")
 
     return {

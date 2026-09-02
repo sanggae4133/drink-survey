@@ -46,9 +46,9 @@ def main():
                    ("카페 온도", "https://map.naver.com", admin_id))
         cafe_id = db.execute("SELECT id FROM cafes WHERE name='카페 온도'").fetchone()["id"]
         temp_opt = json.dumps([{"name": "온도", "required": True,
-                                "choices": [{"label": "HOT", "delta": 0}, {"label": "ICE", "delta": 0}]},
+                                "choices": [{"label": "HOT", "delta_price": 0}, {"label": "ICE", "delta_price": 0}]},
                                {"name": "샷 추가",
-                                "choices": [{"label": "+1샷", "delta": 500}]}], ensure_ascii=False)
+                                "choices": [{"label": "+1샷", "delta_price": 500}]}], ensure_ascii=False)
         for name, price, opts in [("아메리카노", 3500, temp_opt),
                                   ("카페라떼", 4500, temp_opt),
                                   ("유자차", 5000, "[]")]:

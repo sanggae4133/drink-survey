@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}{{ survey['title'] or survey['survey_date'] }} · 음료조사{% endblock %}
+{% block title %}{{ survey_title(survey) }} · 음료조사{% endblock %}
 {% block content %}
-<h1>{{ survey['title'] or (survey['survey_date'] ~ ' ' ~ survey['group_name']) }}</h1>
+<h1>{{ survey_title(survey) }}</h1>
 <p class="muted">
   {{ survey['group_name'] }} · {{ survey['cafe_name'] }} · 마감 <b>{{ survey['deadline_at'] }}</b>
   {% if survey['allow_guests'] %} · <span class="badge">게스트 허용</span>{% endif %}
@@ -22,6 +22,7 @@
 <div class="card" style="border-color:var(--ok)">
   내 선택: <b>{{ item_label(my_response['menu_name'], json_loads(my_response['selected_options'])) }}</b>
   <span class="num">{{ '{:,}'.format(my_response['final_price']) }}원</span>
+  {% if my_response['note'] %}<span class="muted">· {{ my_response['note'] }}</span>{% endif %}
   <span class="muted">— 아래에서 다시 고르면 덮어씁니다</span>
 </div>
 {% elif fav and fav['menu_active'] %}
@@ -29,6 +30,7 @@
   <form method="post" action="/surveys/{{ survey['id'] }}/respond" class="row">
     <input type="hidden" name="use_default" value="1">
     <span>내 즐겨찾기: <b>{{ item_label(fav['menu_name'], json_loads(fav['selected_options'])) }}</b></span>
+    <input name="note" value="{{ fav['note'] or '' }}" placeholder="기타 요청 (선택, 100자 이내)" maxlength="100" style="flex:1">
     <button class="primary">이걸로</button>
   </form>
 </div>
@@ -54,12 +56,13 @@
       <label class="chk">
         <input type="radio" name="opt_{{ gi }}" value="{{ c.label }}"
                {% if g.required and loop.first %}checked{% endif %}>
-        {{ c.label }}{% if c.delta %} ({{ '+' if c.delta > 0 else '' }}{{ '{:,}'.format(c.delta) }}원){% endif %}
+        {{ c.label }}{% if c.delta_price %} ({{ '+' if c.delta_price > 0 else '' }}{{ '{:,}'.format(c.delta_price) }}원){% endif %}
       </label>
       {% endfor %}
     </div>
     {% endfor %}
     <div class="row" style="margin-top:10px">
+      <input name="note" placeholder="기타 요청 (예: 얼음 적게, 시럽 빼고 · 100자 이내)" maxlength="100" style="flex:1">
       <label class="chk"><input type="checkbox" name="save_default" value="1"> 이 선택을 이 카페 즐겨찾기로</label>
       <button class="primary">이걸로 주문</button>
     </div>
@@ -75,6 +78,7 @@
     <select name="guest_menu_id" required>
       {% for m in menus %}<option value="{{ m.row['id'] }}">{{ m.row['name'] }}</option>{% endfor %}
     </select>
+    <input name="note" placeholder="기타 요청 (선택, 100자 이내)" maxlength="100">
     <button>추가</button>
     <span class="muted">필수 옵션은 기본값으로 들어갑니다. 누가 추가했는지 표시됩니다.</span>
   </form>
@@ -87,12 +91,12 @@
 <table>
   <tr><th>이름</th><th>선택</th><th class="num">가격</th></tr>
   {% for p in summary.persons %}
-  <tr><td>{{ p.name }}</td><td>{{ p.item }}</td><td class="num">{{ '{:,}'.format(p.price) }}</td></tr>
+  <tr><td>{{ p.name }}</td><td>{{ p.item }}{% if p.note %} <span class="muted">· {{ p.note }}</span>{% endif %}</td><td class="num">{{ '{:,}'.format(p.price) }}</td></tr>
   {% endfor %}
   {% for g in summary.guests %}
   <tr>
-    <td>{{ g.label }} <span class="muted">({{ g.added_by }} 추가)</span></td>
-    <td>{{ g.item }}</td>
+    <td>{{ g.name }} <span class="muted">({{ g.added_by }} 추가)</span></td>
+    <td>{{ g.item }}{% if g.note %} <span class="muted">· {{ g.note }}</span>{% endif %}</td>
     <td class="num">{{ '{:,}'.format(g.price) }}
       <form class="inline" method="post" action="/surveys/{{ survey['id'] }}/guests/{{ g.id }}/delete">
         <button class="ghost muted">삭제</button>

@@ -3,7 +3,7 @@
 {% block content %}
 <h1>주문서{% if interim %} <span class="badge warn">진행 중 — 마감 전 집계</span>{% endif %}</h1>
 <p class="muted">
-  {{ s.survey['title'] or (s.survey['survey_date'] ~ ' ' ~ s.survey['group_name']) }}
+  {{ survey_title(s.survey) }}
   · {{ s.survey['cafe_name'] }} · 마감 {{ s.survey['deadline_at'] }}
   {% if interim %}&nbsp;<a href="/surveys/{{ survey['id'] }}">응답하러 가기</a>{% endif %}
 </p>
@@ -30,7 +30,7 @@
     응답 {{ s.responded_count }} · 자동 채택 {{ s.auto_count }} · 게스트 {{ s.guest_count }}
     · 제외 {{ s.excluded|length }}{% if s.excluded %} ({{ s.excluded|join(', ') }}){% endif %}
   </p>
-  <textarea id="copytext" rows="{{ s.combos|length + 2 }}" readonly>{{ s.copy_text }}</textarea>
+  <textarea id="copytext" rows="{{ s.copy_text.count('\n') + 1 }}" readonly>{{ s.copy_text }}</textarea>
   <div class="row" style="margin-top:8px">
     <button class="primary" onclick="copyOrder()">주문 텍스트 복사</button>
     <span id="copied" class="muted"></span>
@@ -44,14 +44,14 @@
   {% for p in s.persons %}
   <tr>
     <td>{{ p.name }}{% if p.is_auto %} <span class="badge accent">자동</span>{% endif %}</td>
-    <td>{{ p.item }}</td>
+    <td>{{ p.item }}{% if p.note %} <span class="muted">· {{ p.note }}</span>{% endif %}</td>
     <td class="num">{{ '{:,}'.format(p.price) }}</td>
   </tr>
   {% endfor %}
   {% for g in s.guests %}
   <tr>
-    <td>{{ g.label }} <span class="muted">({{ g.added_by }} 추가)</span></td>
-    <td>{{ g.item }}</td>
+    <td>{{ g.name }} <span class="muted">({{ g.added_by }} 추가)</span></td>
+    <td>{{ g.item }}{% if g.note %} <span class="muted">· {{ g.note }}</span>{% endif %}</td>
     <td class="num">{{ '{:,}'.format(g.price) }}</td>
   </tr>
   {% endfor %}

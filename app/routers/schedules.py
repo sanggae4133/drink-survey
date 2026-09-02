@@ -1,6 +1,8 @@
 """반복 스케줄: 등록은 모든 사용자, 수정·중지는 생성자와 admin."""
 import sqlite3
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
@@ -9,9 +11,6 @@ from ..db import db_dep
 from ..deps import current_user, flash, render
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
-
-WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
-
 
 @router.get("")
 def schedules_list(request: Request, user: sqlite3.Row = Depends(current_user),
@@ -24,7 +23,7 @@ def schedules_list(request: Request, user: sqlite3.Row = Depends(current_user),
     groups = db.execute("SELECT * FROM groups ORDER BY name").fetchall()
     cafes = db.execute("SELECT * FROM cafes WHERE is_active=1 ORDER BY name").fetchall()
     return render(request, "schedules.html", user=user, scheds=scheds,
-                  groups=groups, cafes=cafes, weekdays=WEEKDAYS)
+                  groups=groups, cafes=cafes, weekdays=services.KR_WEEKDAYS)
 
 
 @router.post("")
@@ -35,6 +34,11 @@ def schedule_create(request: Request, group_id: int = Form(...), cafe_id: int = 
                     db: sqlite3.Connection = Depends(db_dep)):
     if not (0 <= weekday <= 6):
         raise HTTPException(400)
+    try:
+        datetime.strptime(deadline_time, "%H:%M")
+    except ValueError:
+        flash(request, "마감 시각 형식이 잘못됐습니다 (HH:MM)")
+        return RedirectResponse("/schedules", status_code=303)
     if user["role"] != "admin" and not services.is_effective_member(db, group_id, user["id"]):
         flash(request, "자기가 속한 그룹(또는 그 상위 그룹)에만 스케줄을 걸 수 있습니다")
         return RedirectResponse("/schedules", status_code=303)

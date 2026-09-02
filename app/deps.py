@@ -5,9 +5,11 @@ from pathlib import Path
 from fastapi import Depends, HTTPException, Request
 from fastapi.templating import Jinja2Templates
 
+from . import services
 from .db import db_dep
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+templates.env.globals["survey_title"] = services.survey_title
 
 
 def _login_redirect() -> HTTPException:

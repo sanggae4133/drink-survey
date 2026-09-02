@@ -1,4 +1,5 @@
 """카페·메뉴: 누구나 등록/수정. 메뉴 수정은 updated_by/updated_at 기록."""
+import json
 import sqlite3
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -9,6 +10,26 @@ from ..db import db_dep, now_str
 from ..deps import current_user, flash, render
 
 router = APIRouter(tags=["cafes"])
+
+
+def _options_from_form(form) -> str:
+    """옵션 편집 UI의 g{i}_name / g{i}_required / g{i}_label[] / g{i}_price[] → 저장용 JSON.
+
+    빈 라벨 행은 무시. 그룹 순서는 폼(=화면) 순서, 인덱스는 필드를 묶는 용도라 비어 있어도 된다.
+    검증(개수·길이·선택지 1개 이상·금액 정수)은 models.parse_option_groups 가 한다.
+    """
+    groups = []
+    for k in form:
+        if not (k.startswith("g") and k.endswith("_name")):
+            continue
+        i = k[1:-5]
+        choices = [{"label": label.strip(), "delta_price": price or 0}
+                   for label, price in zip(form.getlist(f"g{i}_label"), form.getlist(f"g{i}_price"))
+                   if label.strip()]
+        groups.append({"name": form[k].strip(), "required": bool(form.get(f"g{i}_required")),
+                       "choices": choices})
+    validated = models.parse_option_groups(json.dumps(groups, ensure_ascii=False))
+    return json.dumps([g.model_dump() for g in validated], ensure_ascii=False)  # 정규화된 형태로 저장
 
 
 def _url(raw: str) -> str | None:
@@ -52,12 +73,12 @@ def cafe_detail(cid: int, request: Request, user: sqlite3.Row = Depends(current_
     cafe = db.execute("SELECT * FROM cafes WHERE id=?", (cid,)).fetchone()
     if cafe is None:
         raise HTTPException(404)
-    menus = db.execute(
+    menu_rows = db.execute(
         "SELECT m.*, u.name AS updater_name FROM menus m "
         "LEFT JOIN users u ON u.id=m.updated_by "
         "WHERE m.cafe_id=? ORDER BY m.is_active DESC, m.name", (cid,)).fetchall()
-    return render(request, "cafe_detail.html", user=user, cafe=cafe, menus=menus,
-                  options_example=models.OPTIONS_EXAMPLE)
+    menus = [{"row": m, "groups": models.parse_option_groups(m["options"])} for m in menu_rows]
+    return render(request, "cafe_detail.html", user=user, cafe=cafe, menus=menus)
 
 
 @router.post("/cafes/{cid}")
@@ -85,34 +106,33 @@ def cafe_update(cid: int, request: Request, name: str = Form(...), menu_url: str
 
 
 @router.post("/cafes/{cid}/menus")
-def menu_create(cid: int, request: Request, name: str = Form(...),
-                base_price: int = Form(...), options: str = Form("[]"),
-                user: sqlite3.Row = Depends(current_user),
-                db: sqlite3.Connection = Depends(db_dep)):
+async def menu_create(cid: int, request: Request, name: str = Form(...),
+                      base_price: int = Form(..., ge=0, le=10_000_000),
+                      user: sqlite3.Row = Depends(current_user),
+                      db: sqlite3.Connection = Depends(db_dep)):
     try:
-        models.parse_option_groups(options)
+        options = _options_from_form(await request.form())
     except ValueError as e:
         flash(request, str(e))
         return RedirectResponse(f"/cafes/{cid}", status_code=303)
     with db:
         db.execute(
             "INSERT INTO menus (cafe_id, name, base_price, options, created_by) VALUES (?,?,?,?,?)",
-            (cid, name.strip(), base_price, options.strip() or "[]", user["id"]))
+            (cid, name.strip(), base_price, options, user["id"]))
     flash(request, f"메뉴 추가됨: {name}")
     return RedirectResponse(f"/cafes/{cid}", status_code=303)
 
 
 @router.post("/menus/{mid}")
-def menu_update(mid: int, request: Request, name: str = Form(...),
-                base_price: int = Form(...), options: str = Form("[]"),
-                is_active: str = Form(""),
-                user: sqlite3.Row = Depends(current_user),
-                db: sqlite3.Connection = Depends(db_dep)):
+async def menu_update(mid: int, request: Request, name: str = Form(...),
+                      base_price: int = Form(..., ge=0, le=10_000_000), is_active: str = Form(""),
+                      user: sqlite3.Row = Depends(current_user),
+                      db: sqlite3.Connection = Depends(db_dep)):
     menu = db.execute("SELECT * FROM menus WHERE id=?", (mid,)).fetchone()
     if menu is None:
         raise HTTPException(404)
     try:
-        models.parse_option_groups(options)
+        options = _options_from_form(await request.form())
     except ValueError as e:
         flash(request, str(e))
         return RedirectResponse(f"/cafes/{menu['cafe_id']}", status_code=303)
@@ -120,7 +140,7 @@ def menu_update(mid: int, request: Request, name: str = Form(...),
         db.execute(
             "UPDATE menus SET name=?, base_price=?, options=?, is_active=?, updated_by=?, updated_at=? "
             "WHERE id=?",
-            (name.strip(), base_price, options.strip() or "[]",
+            (name.strip(), base_price, options,
              1 if is_active else 0, user["id"], now_str(), mid))
     flash(request, f"메뉴 수정됨: {name}")
     return RedirectResponse(f"/cafes/{menu['cafe_id']}", status_code=303)

@@ -1,6 +1,36 @@
 {% extends "base.html" %}
 {% block title %}{{ cafe['name'] }} · 음료조사{% endblock %}
+
+{# ── 옵션 편집 UI. i는 그룹 인덱스(서버는 g{i}_* 필드를 인덱스 순으로 읽음). JS 템플릿용으로 i='{i}'도 허용 ── #}
+{% macro opt_row(i, c=None) %}
+<div class="row opt-row">
+  <input name="g{{ i }}_label" value="{{ c.label if c else '' }}" placeholder="선택지 (예: HOT)" required>
+  <input name="g{{ i }}_price" type="number" value="{{ c.delta_price if c else 0 }}" style="width:100px"> 원
+  <button type="button" class="ghost muted" onclick="this.closest('.opt-row').remove()" title="선택지 삭제">✕</button>
+</div>
+{% endmacro %}
+{% macro opt_group(i, g=None) %}
+<fieldset class="opt-group" data-i="{{ i }}">
+  <div class="row">
+    <input name="g{{ i }}_name" value="{{ g.name if g else '' }}" placeholder="옵션 그룹명 (예: 온도, 샷 추가)" required>
+    <label class="chk"><input type="checkbox" name="g{{ i }}_required" value="1" {% if g and g.required %}checked{% endif %}> 필수 선택</label>
+    <button type="button" class="ghost muted" onclick="this.closest('.opt-group').remove()">그룹 삭제</button>
+  </div>
+  <div class="choices">{% for c in (g.choices if g else []) %}{{ opt_row(i, c) }}{% endfor %}</div>
+  <button type="button" class="ghost" onclick="addRow(this)">+ 선택지</button>
+</fieldset>
+{% endmacro %}
+{% macro opt_editor(groups) %}
+<div class="opt-groups">{% for g in groups %}{{ opt_group(loop.index0, g) }}{% endfor %}</div>
+<button type="button" class="ghost" onclick="addGroup(this)">+ 옵션 그룹</button>
+{% endmacro %}
+
 {% block content %}
+<style>
+.opt-group{border:1px dashed var(--line);border-radius:8px;padding:8px 10px;margin:8px 0}
+.opt-group .choices{margin:6px 0 4px 18px}
+.opt-row{margin:4px 0}
+</style>
 <h1>{{ cafe['name'] }}</h1>
 
 <div class="card">
@@ -10,8 +40,8 @@
     <label>공통 기본음료
       <select name="default_menu_id">
         <option value="">(없음)</option>
-        {% for m in menus if m['is_active'] %}
-        <option value="{{ m['id'] }}" {% if cafe['default_menu_id']==m['id'] %}selected{% endif %}>{{ m['name'] }}</option>
+        {% for m in menus if m.row['is_active'] %}
+        <option value="{{ m.row['id'] }}" {% if cafe['default_menu_id']==m.row['id'] %}selected{% endif %}>{{ m.row['name'] }}</option>
         {% endfor %}
       </select>
     </label>
@@ -22,16 +52,16 @@
 
 <h2>메뉴</h2>
 {% for m in menus %}
-<div class="card" {% if not m['is_active'] %}style="opacity:.55"{% endif %}>
-  <form method="post" action="/menus/{{ m['id'] }}">
+<div class="card" {% if not m.row['is_active'] %}style="opacity:.55"{% endif %}>
+  <form method="post" action="/menus/{{ m.row['id'] }}">
     <div class="row">
-      <input name="name" value="{{ m['name'] }}" required>
-      <input name="base_price" type="number" value="{{ m['base_price'] }}" required style="width:110px"> 원
-      <label class="chk"><input type="checkbox" name="is_active" value="1" {% if m['is_active'] %}checked{% endif %}> 판매 중</label>
+      <input name="name" value="{{ m.row['name'] }}" required>
+      <input name="base_price" type="number" value="{{ m.row['base_price'] }}" required style="width:110px"> 원
+      <label class="chk"><input type="checkbox" name="is_active" value="1" {% if m.row['is_active'] %}checked{% endif %}> 판매 중</label>
       <button>수정</button>
-      {% if m['updated_by'] %}<span class="muted">최근 수정: {{ m['updater_name'] }} {{ m['updated_at'] }}</span>{% endif %}
+      {% if m.row['updated_by'] %}<span class="muted">최근 수정: {{ m.row['updater_name'] }} {{ m.row['updated_at'] }}</span>{% endif %}
     </div>
-    <textarea name="options" rows="2" spellcheck="false">{{ m['options'] }}</textarea>
+    {{ opt_editor(m.groups) }}
   </form>
 </div>
 {% endfor %}
@@ -44,8 +74,27 @@
       <input name="base_price" type="number" placeholder="가격(원)" required style="width:130px">
       <button class="primary">추가</button>
     </div>
-    <textarea name="options" rows="2" spellcheck="false" placeholder='옵션 JSON — 예: {{ options_example }}'></textarea>
-    <p class="muted">옵션 형식: [{"name": 그룹명, "required": true/false, "choices": [{"label": 라벨, "delta": 가격증감}]}] — 비우면 옵션 없음</p>
+    {{ opt_editor([]) }}
+    <p class="muted">옵션 그룹은 "온도 → HOT / ICE"처럼 한 번에 하나를 고르는 묶음입니다. <b>필수 선택</b>을 켜면 응답자가 반드시 골라야 하고,
+      자동 채택·게스트 잔에는 첫 선택지가 들어갑니다. 금액은 기본가에 더해지는 값이며 음수도 됩니다(예: 연하게 -500).
+      옵션이 없는 메뉴는 그룹을 추가하지 않으면 됩니다. 기타 요청(서술형)은 응답 화면에 항상 있으니 옵션으로 만들 필요 없습니다.</p>
   </form>
 </div>
+
+<template id="tpl-group">{{ opt_group('{i}') }}</template>
+<template id="tpl-row">{{ opt_row('{i}') }}</template>
+<script>
+function tpl(id, i){ return document.getElementById(id).innerHTML.replaceAll('{i}', i); }
+function addRow(btn){
+  const g = btn.closest('.opt-group');
+  g.querySelector('.choices').insertAdjacentHTML('beforeend', tpl('tpl-row', g.dataset.i));
+}
+function addGroup(btn){
+  const box = btn.previousElementSibling;
+  const used = [...box.querySelectorAll('.opt-group')].map(g => +g.dataset.i);
+  const i = used.length ? Math.max(...used) + 1 : 0;
+  box.insertAdjacentHTML('beforeend', tpl('tpl-group', i));
+  addRow(box.lastElementChild);  // 빈 그룹은 의미 없으니 선택지 한 줄 같이
+}
+</script>
 {% endblock %}

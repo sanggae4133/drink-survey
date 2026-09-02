@@ -12,7 +12,7 @@
   {% for f in favs %}
   <tr>
     <td>{{ f.row['cafe_name'] }}</td>
-    <td>{{ f.label }}</td>
+    <td>{{ f.label }}{% if f.row['note'] %} <span class="muted">· {{ f.row['note'] }}</span>{% endif %}</td>
     <td>
       <form class="inline" method="post" action="/me/defaults/{{ f.row['cafe_id'] }}/delete">
         <button class="ghost muted">삭제</button>

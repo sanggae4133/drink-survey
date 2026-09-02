@@ -26,7 +26,7 @@
       </label>
     </div>
     <div class="row" style="margin-bottom:10px">
-      <input name="title" placeholder="제목 (예: 9/4 주간회의 — 비우면 자동)" style="flex:1"
+      <input name="title" placeholder="제목 (예: 9/7(월) 주간회의 — 비우면 날짜(요일) 그룹명)" style="flex:1"
              value="{{ src['title'] if src and src['title'] else '' }}">
       <label class="chk"><input type="checkbox" name="allow_guests" value="1"
              {% if src and src['allow_guests'] %}checked{% endif %}> 게스트 잔 허용</label>

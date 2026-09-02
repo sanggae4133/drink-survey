@@ -17,10 +17,16 @@
       {% for w in weekdays %}<option value="{{ loop.index0 }}">{{ w }}요일</option>{% endfor %}
     </select>
     <label>마감 <input type="time" name="deadline_time" value="10:30" required></label>
-    <input name="title_pattern" placeholder="제목 패턴 (예: {M/D} 주간회의)">
+    <input name="title_pattern" placeholder="제목 패턴 (선택)">
     <label class="chk"><input type="checkbox" name="allow_guests" value="1"> 게스트 허용</label>
     <button class="primary">등록</button>
   </form>
+  <p class="muted">
+    <b>제목 패턴</b>: 자동 생성되는 조사의 제목. <code>{M/D}</code>를 쓰면 생성일의 <b>월/일(요일)</b>로 바뀝니다.
+    예: <code>{M/D} 주간회의</code> → <b>9/4(월) 주간회의</b>, <code>월요 티타임</code> → 매주 같은 제목.
+    비우면 <b>날짜(요일) 그룹명</b>(예: 2026-09-07(월) 시스템1팀)으로 자동 표시됩니다.
+    <b>마감</b>은 조사 당일 기준 시각이며, 마감이 지난 뒤 첫 접속한 주는 조사가 생성되지 않습니다.
+  </p>
 </div>
 
 <div class="tbl-scroll">

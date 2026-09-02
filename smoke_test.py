@@ -67,6 +67,10 @@ with TestClient(app):
     for i, name in [(1, "김선임"), (2, "박책임"), (3, "최선임"), (4, "정주임")]:
         admin.post("/admin/users", data={"email": f"m{i}@t.co", "name": name, "role": "member"})
     ok(q1("SELECT COUNT(*) n FROM users")["n"] == 5, "회원 사전 등록 4명")
+    admin.post("/admin/users", data={"email": "evil@t.co", "name": "x'); alert(1); ('", "role": "member"})
+    h = admin.get("/admin/users").text
+    ok("confirm('x" not in h and "alert(1); ('" not in h, "회원 이름이 JS 문자열로 새지 않음 (confirm XSS)")
+    admin.post(f"/admin/users/{q1("SELECT id FROM users WHERE email='evil@t.co'")['id']}/toggle")
 
     print("== 2. 그룹 트리 ==")
     admin.post("/admin/groups", data={"name": "코어개발본부", "parent_group_id": ""})
@@ -81,6 +85,8 @@ with TestClient(app):
     ok(q1("SELECT parent_group_id p FROM groups WHERE id=?", hq)["p"] is None,
        "순환 참조(본부→팀을 상위로) 거절")
     from app import services
+    ok(services.survey_title({"title": None, "survey_date": "2026-01-05", "group_name": "시스템1팀"})
+       == "2026-01-05(월) 시스템1팀", "제목 없으면 날짜(요일) 그룹명")
     dbx = get_conn()
     eff = services.effective_members(dbx, hq)
     dbx.close()
@@ -93,38 +99,50 @@ with TestClient(app):
     print("== 3. 카페·메뉴 ==")
     admin.post("/cafes", data={"name": "카페 온도", "menu_url": ""})
     cafe = q1("SELECT id FROM cafes WHERE name='카페 온도'")["id"]
-    temp_opt = json.dumps([
-        {"name": "온도", "required": True,
-         "choices": [{"label": "HOT", "delta": 0}, {"label": "ICE", "delta": 0}]},
-        {"name": "샷 추가", "choices": [{"label": "+1샷", "delta": 500}]}], ensure_ascii=False)
-    admin.post(f"/cafes/{cafe}/menus", data={"name": "아메리카노", "base_price": 3500, "options": temp_opt})
-    admin.post(f"/cafes/{cafe}/menus", data={"name": "카페라떼", "base_price": 4500, "options": temp_opt})
-    admin.post(f"/cafes/{cafe}/menus", data={"name": "유자차", "base_price": 5000, "options": "[]"})
-    r = admin.post(f"/cafes/{cafe}/menus", data={"name": "불량", "base_price": 1, "options": "{bad"})
-    ok(q1("SELECT COUNT(*) n FROM menus")["n"] == 3, "옵션 JSON 검증 — 불량 메뉴 거절")
+    # 옵션 편집 UI 필드: g{i}_name / g{i}_required / g{i}_label[] / g{i}_price[]  (빈 라벨 행은 무시)
+    temp_opt = {"g0_name": "온도", "g0_required": "1", "g0_label": ["HOT", "", "ICE"], "g0_price": ["0", "", "0"],
+                "g3_name": "샷 추가", "g3_label": ["+1샷"], "g3_price": ["500"]}
+    admin.post(f"/cafes/{cafe}/menus", data={"name": "아메리카노", "base_price": 3500, **temp_opt})
+    admin.post(f"/cafes/{cafe}/menus", data={"name": "카페라떼", "base_price": 4500, **temp_opt})
+    admin.post(f"/cafes/{cafe}/menus", data={"name": "유자차", "base_price": 5000})
+    admin.post(f"/cafes/{cafe}/menus", data={"name": "불량", "base_price": 1, "g0_name": "온도"})
+    ok(q1("SELECT COUNT(*) n FROM menus")["n"] == 3, "선택지 없는 옵션 그룹 — 메뉴 거절")
+    stored = json.loads(q1("SELECT options o FROM menus WHERE name='아메리카노'")["o"])
+    ok([g["name"] for g in stored] == ["온도", "샷 추가"] and len(stored[0]["choices"]) == 2
+       and stored[1]["choices"][0]["delta_price"] == 500,
+       "옵션 UI 폼 → JSON (빈 행 무시, 인덱스 공백 허용, 금액 정수)")
     ame = q1("SELECT id FROM menus WHERE name='아메리카노'")["id"]
     latte = q1("SELECT id FROM menus WHERE name='카페라떼'")["id"]
     admin.post(f"/cafes/{cafe}", data={"name": "카페 온도", "menu_url": "", "default_menu_id": str(ame)})
     ok(q1("SELECT default_menu_id d FROM cafes WHERE id=?", cafe)["d"] == ame, "공통 기본음료 지정")
     admin.post(f"/cafes/{cafe}", data={"name": "카페 온도", "menu_url": "javascript:alert(1)"})
     ok(q1("SELECT menu_url u FROM cafes WHERE id=?", cafe)["u"] is None, "menu_url은 http(s)만 — javascript: 거절")
-    r = admin.post(f"/cafes/{cafe}/menus", data={"name": "비대", "base_price": 1,
-                   "options": json.dumps([{"name": f"g{i}", "choices": [{"label": "x"}]} for i in range(21)])})
+    big = {f"g{i}_name": f"g{i}" for i in range(21)} | {f"g{i}_label": ["x"] for i in range(21)}
+    r = admin.post(f"/cafes/{cafe}/menus", data={"name": "비대", "base_price": 1, **big})
+    admin.post(f"/cafes/{cafe}/menus", data={"name": "폭주", "base_price": 1, "g0_name": "x",
+                                            "g0_label": ["y"], "g0_price": ["9" * 30]})
+    admin.post(f"/cafes/{cafe}/menus", data={"name": "폭주2", "base_price": "9" * 30})
+    ok(q1("SELECT COUNT(*) n FROM menus WHERE name LIKE '폭주%'")["n"] == 0, "금액 범위 초과(sqlite 오버플로) 거절")
     ok(q1("SELECT COUNT(*) n FROM menus WHERE name='비대'")["n"] == 0, "옵션 그룹 20개 초과 거절")
-    admin.post(f"/menus/{latte}", data={"name": "카페라떼", "base_price": 4600,
-                                        "options": temp_opt, "is_active": "1"})
+    admin.post(f"/menus/{latte}", data={"name": "카페라떼", "base_price": 4600, "is_active": "1", **temp_opt})
     ok(q1("SELECT updated_by u FROM menus WHERE id=?", latte)["u"] == uid["admin@t.co"],
        "메뉴 수정 시 updated_by 기록")
 
     print("== 4. 조사·응답 (본부 대상 = 트리 전체) ==")
     m1, m2 = client_for("m1@t.co"), client_for("m2@t.co")
     client_for("m3@t.co").get("/")  # m3: active로 만들기 — 즐겨찾기 없음 → 카페 기본음료 대상
-    deadline = (datetime.now() + timedelta(hours=1)).strftime("%H:%M")
-    today = datetime.now().strftime("%Y-%m-%d")
+    dl = datetime.now() + timedelta(hours=1)  # 자정 넘어가면 survey_date도 같이 넘어가야 한다
+    deadline, today = dl.strftime("%H:%M"), dl.strftime("%Y-%m-%d")
     m1.post("/surveys", data={"survey_date": today, "deadline_time": deadline,
                               "group_id": str(hq), "cafe_id": str(cafe),
                               "title": "스모크 조사", "allow_guests": "1"})
     sid = q1("SELECT id FROM surveys WHERE title='스모크 조사'")["id"]
+    m1.post("/surveys", data={"survey_date": "zzzz", "deadline_time": "99:99",
+                              "group_id": str(hq), "cafe_id": str(cafe), "title": "깨진 날짜"})
+    m1.post("/schedules", data={"group_id": str(team), "cafe_id": str(cafe), "weekday": "0", "deadline_time": "abc"})
+    ok(q1("SELECT COUNT(*) n FROM surveys WHERE title='깨진 날짜'")["n"] == 0
+       and q1("SELECT COUNT(*) n FROM survey_schedules")["n"] == 0
+       and m1.get("/").status_code == 200, "형식 깨진 날짜·시각 거절 (홈 500 방지)")
     admin.post("/admin/groups", data={"name": "타부서", "parent_group_id": ""})
     other = q1("SELECT id FROM groups WHERE name='타부서'")["id"]
     m1.post("/surveys", data={"survey_date": today, "deadline_time": deadline,
@@ -142,13 +160,17 @@ with TestClient(app):
     ok(row and row["final_price"] == 4000, "응답 저장 + 옵션 가격(3500+500)")
     ok(q1("SELECT COUNT(*) n FROM user_cafe_defaults WHERE user_id=?", uid["m1@t.co"])["n"] == 1,
        "즐겨찾기 저장")
-    m1.post(f"/surveys/{sid}/respond", data={"menu_id": str(latte), "opt_0": "HOT"})
+    m1.post(f"/surveys/{sid}/respond", data={"menu_id": str(latte), "opt_0": "HOT", "note": "  얼음 적게 "})
     rows = q("SELECT * FROM survey_responses WHERE survey_id=? AND participant_user_id=?",
              sid, uid["m1@t.co"])
     ok(len(rows) == 1 and rows[0]["menu_id"] == latte and rows[0]["final_price"] == 4600,
        "1인 1잔 — 재응답은 덮어쓰기(수정된 가격 4600 반영)")
+    ok(rows[0]["note"] == "얼음 적게", "기타 요청 저장(trim)")
 
-    m2.post(f"/surveys/{sid}/respond", data={"menu_id": str(ame), "opt_0": "ICE", "save_default": "1"})
+    m2.post(f"/surveys/{sid}/respond", data={"menu_id": str(ame), "opt_0": "ICE", "save_default": "1",
+                                             "note": "덜 달게"})
+    ok(q1("SELECT note FROM user_cafe_defaults WHERE user_id=?", uid["m2@t.co"])["note"] == "덜 달게"
+       and "덜 달게" in m2.get("/me").text, "즐겨찾기에 기타 요청도 저장 + 내 설정에 표시")
 
     m2.post(f"/surveys/{sid}/guests", data={"guest_label": "팀장님 손님", "guest_menu_id": str(latte)})
     g = q1("SELECT * FROM survey_responses WHERE survey_id=? AND participant_user_id IS NULL", sid)
@@ -179,9 +201,11 @@ with TestClient(app):
     ok(uid["m4@t.co"] not in auto_by_user, "invited(미로그인) 멤버는 자동 채택 제외")
     r = m2.get(f"/surveys/{sid}/summary")
     ok(r.status_code == 200 and "합계" in r.text and "자동" in r.text, "주문서(집계+개인별) 렌더")
+    ok("* 김선임: 얼음 적게" in r.text, "기타 요청이 복사 텍스트에 포함")
 
     print("== 6. lazy 스케줄 생성 ==")
-    future = (datetime.now() + timedelta(hours=1)).strftime("%H:%M")
+    fut = datetime.now() + timedelta(hours=1)
+    future = fut.strftime("%H:%M") if fut.date() == datetime.now().date() else "23:59"  # 자정 직전 방어
     past = (datetime.now() - timedelta(hours=1)).strftime("%H:%M")
     wd = datetime.now().weekday()
     m1.post("/schedules", data={"group_id": str(team), "cafe_id": str(cafe), "weekday": str(wd),
@@ -193,7 +217,8 @@ with TestClient(app):
     created = q("SELECT * FROM surveys WHERE schedule_id IS NOT NULL")
     ok(len(created) == 1, "요일 당일 첫 접속이 조사 생성 (멱등, stale 스케줄은 건너뜀)")
     now = datetime.now()
-    ok(created[0]["title"] == f"{now.month}/{now.day} 주간회의", "제목 패턴 {M/D} 치환")
+    ok(created[0]["title"] == f"{now.month}/{now.day}({'월화수목금토일'[now.weekday()]}) 주간회의",
+       "제목 패턴 {M/D} → 월/일(요일) 치환")
 
     print("== 7. 접근 회수·하드닝 ==")
     m3 = client_for("m3@t.co")

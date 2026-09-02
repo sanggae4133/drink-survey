@@ -8,7 +8,7 @@
   <div class="card">
     <div class="row" style="justify-content:space-between">
       <div>
-        <a href="/surveys/{{ s['id'] }}"><b>{{ s['title'] or (s['survey_date'] ~ ' ' ~ s['group_name']) }}</b></a>
+        <a href="/surveys/{{ s['id'] }}"><b>{{ survey_title(s) }}</b></a>
         <div class="muted">{{ s['group_name'] }} · {{ s['cafe_name'] }} · 마감 {{ s['deadline_at'][5:] }}</div>
       </div>
       <div>

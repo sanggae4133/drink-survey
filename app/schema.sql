@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS menus (
   cafe_id     INTEGER NOT NULL REFERENCES cafes(id),
   name        TEXT NOT NULL,
   base_price  INTEGER NOT NULL,
-  options     TEXT NOT NULL DEFAULT '[]',  -- JSON: [{name, required, choices:[{label, delta}]}]
+  options     TEXT NOT NULL DEFAULT '[]',  -- JSON: [{name, required, choices:[{label, delta_price}]}]
   is_active   INTEGER NOT NULL DEFAULT 1,
   created_by  INTEGER NOT NULL REFERENCES users(id),
   created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS user_cafe_defaults (
   user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   cafe_id          INTEGER NOT NULL REFERENCES cafes(id) ON DELETE CASCADE,
   menu_id          INTEGER NOT NULL REFERENCES menus(id),
-  selected_options TEXT NOT NULL DEFAULT '[]',   -- [{name, choice, delta}]
+  selected_options TEXT NOT NULL DEFAULT '[]',   -- [{name, choice, delta_price}]
+  note             TEXT,                          -- 기타 요청도 함께 저장 (원터치·자동 채택에 그대로 사용)
   PRIMARY KEY (user_id, cafe_id)
 );
 
@@ -63,7 +64,7 @@ CREATE TABLE IF NOT EXISTS survey_schedules (
   weekday       INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),  -- 0=월 … 6=일
   deadline_time TEXT NOT NULL,                                     -- 'HH:MM' (조사 당일 마감 시각)
   allow_guests  INTEGER NOT NULL DEFAULT 0,
-  title_pattern TEXT,                                              -- 예: '{M/D} 주간회의'
+  title_pattern TEXT,                                              -- 예: '{M/D} 주간회의' → '9/4(월) 주간회의'
   enabled       INTEGER NOT NULL DEFAULT 1,
   created_by    INTEGER NOT NULL REFERENCES users(id),
   created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
@@ -95,6 +96,7 @@ CREATE TABLE IF NOT EXISTS survey_responses (
   selected_options    TEXT NOT NULL DEFAULT '[]',    -- 선택 시점 스냅샷
   final_price         INTEGER NOT NULL,              -- 가격 스냅샷
   is_auto             INTEGER NOT NULL DEFAULT 0,    -- 마감 시 자동 채택
+  note                TEXT,                          -- 기타 요청(서술형, 예: 얼음 적게). 집계 합산엔 안 섞고 개인별에 표시
   created_by          INTEGER NOT NULL REFERENCES users(id),  -- 게스트 잔 추가자 표시용
   created_at          TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   updated_at          TEXT,
