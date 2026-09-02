@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS users (
   email       TEXT NOT NULL UNIQUE,       -- admin이 등록하는 회사 이메일 (바인딩 매칭 키)
   name        TEXT NOT NULL,
   role        TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin','member')),
-  status      TEXT NOT NULL DEFAULT 'invited' CHECK (status IN ('invited','active')),
+  status      TEXT NOT NULL DEFAULT 'invited' CHECK (status IN ('invited','active','disabled')),
+                                            -- disabled: 퇴사 등 접근 회수. 기존 세션도 다음 요청부터 거절
   created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 

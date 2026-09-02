@@ -25,11 +25,22 @@
         <option value="admin" {% if u['role']=='admin' %}selected{% endif %}>admin</option>
       </select>
     </td>
-    <td>{% if u['status']=='active' %}<span class="badge ok">active</span>{% else %}<span class="badge">invited</span>{% endif %}</td>
-    <td><button class="ghost">저장</button></td>
+    <td>{% if u['status']=='active' %}<span class="badge ok">active</span>
+        {% elif u['status']=='disabled' %}<span class="badge warn">disabled</span>
+        {% else %}<span class="badge">invited</span>{% endif %}</td>
+    <td class="row">
+      <button class="ghost">저장</button>
+      {% if u['id'] != user['id'] %}
+      <button class="ghost muted" form="toggle-{{ u['id'] }}">{{ '복구' if u['status']=='disabled' else '비활성화' }}</button>
+      {% endif %}
+    </td>
     </form>
   </tr>
   {% endfor %}
 </table>
 </div>
+{# 행 안의 form 중첩을 피하기 위해 토글 폼은 밖에 두고 button[form]으로 연결 #}
+{% for u in users %}<form id="toggle-{{ u['id'] }}" method="post" action="/admin/users/{{ u['id'] }}/toggle"
+  onsubmit="return confirm('{{ u['name'] }} 계정을 {{ '복구' if u['status']=='disabled' else '비활성화' }}할까요?')"></form>{% endfor %}
+<p class="muted">비활성화: 퇴사자 등 접근 회수. 이미 로그인된 브라우저도 다음 요청부터 로그아웃되며, 조사 대상·자동 채택에서 빠집니다.</p>
 {% endblock %}

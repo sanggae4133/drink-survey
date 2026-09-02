@@ -39,7 +39,7 @@
       <label class="chk">
         <input type="checkbox" name="member_ids" value="{{ u['id'] }}"
                {% if u['id'] in member_map[g['id']] %}checked{% endif %}>
-        {{ u['name'] }}{% if u['status']=='invited' %}<span class="muted">(초대됨)</span>{% endif %}
+        {{ u['name'] }}{% if u['status']=='invited' %}<span class="muted">(초대됨)</span>{% elif u['status']=='disabled' %}<span class="muted">(비활성)</span>{% endif %}
       </label>
       {% endfor %}
     </div>

@@ -1,5 +1,6 @@
 """앱 조립: 미들웨어, 라우터, 예외 핸들러, 스키마 초기화."""
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import config
@@ -17,6 +18,23 @@ app.add_middleware(
     # 개발(DEV_LOGIN=1)은 http://127.0.0.1 이라 False.
     https_only=not config.DEV_LOGIN,
 )
+
+MAX_BODY = 64 * 1024  # 폼 몇 칸짜리 앱. 옵션 JSON도 수 KB면 충분
+
+
+@app.middleware("http")
+async def _harden(request: Request, call_next):
+    # ponytail: Content-Length만 본다. chunked 업로드는 안 잡히니 문제 되면 receive 래퍼로
+    if int(request.headers.get("content-length") or 0) > MAX_BODY:
+        return PlainTextResponse("요청 본문이 너무 큽니다", status_code=413)
+    resp = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "same-origin"
+    if not config.DEV_LOGIN:  # 브라우저↔Funnel 구간이 https라 유효
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return resp
+
 
 init_db()
 

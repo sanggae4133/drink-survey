@@ -11,6 +11,14 @@ from ..deps import current_user, flash, render
 router = APIRouter(tags=["cafes"])
 
 
+def _url(raw: str) -> str | None:
+    """빈 값은 None. http(s)만 허용 — 'javascript:' 링크를 다른 사용자가 클릭하게 만드는 XSS 차단."""
+    u = raw.strip()
+    if u and not u.startswith(("http://", "https://")):
+        raise ValueError("메뉴판 링크는 http:// 또는 https:// 로 시작해야 합니다")
+    return u or None
+
+
 @router.get("/cafes")
 def cafes_list(request: Request, user: sqlite3.Row = Depends(current_user),
                db: sqlite3.Connection = Depends(db_dep)):
@@ -26,10 +34,15 @@ def cafes_list(request: Request, user: sqlite3.Row = Depends(current_user),
 def cafe_create(request: Request, name: str = Form(...), menu_url: str = Form(""),
                 user: sqlite3.Row = Depends(current_user),
                 db: sqlite3.Connection = Depends(db_dep)):
+    try:
+        url = _url(menu_url)
+    except ValueError as e:
+        flash(request, str(e))
+        return RedirectResponse("/cafes", status_code=303)
     with db:
         cur = db.execute(
             "INSERT INTO cafes (name, menu_url, created_by) VALUES (?,?,?)",
-            (name.strip(), menu_url.strip() or None, user["id"]))
+            (name.strip(), url, user["id"]))
     return RedirectResponse(f"/cafes/{cur.lastrowid}", status_code=303)
 
 
@@ -53,6 +66,11 @@ def cafe_update(cid: int, request: Request, name: str = Form(...), menu_url: str
                 user: sqlite3.Row = Depends(current_user),
                 db: sqlite3.Connection = Depends(db_dep)):
     dmi = int(default_menu_id) if default_menu_id else None
+    try:
+        url = _url(menu_url)
+    except ValueError as e:
+        flash(request, str(e))
+        return RedirectResponse(f"/cafes/{cid}", status_code=303)
     if dmi is not None:
         ok = db.execute("SELECT 1 FROM menus WHERE id=? AND cafe_id=? AND is_active=1",
                         (dmi, cid)).fetchone()
@@ -61,7 +79,7 @@ def cafe_update(cid: int, request: Request, name: str = Form(...), menu_url: str
             return RedirectResponse(f"/cafes/{cid}", status_code=303)
     with db:
         db.execute("UPDATE cafes SET name=?, menu_url=?, default_menu_id=? WHERE id=?",
-                   (name.strip(), menu_url.strip() or None, dmi, cid))
+                   (name.strip(), url, dmi, cid))
     flash(request, "카페 정보를 저장했습니다")
     return RedirectResponse(f"/cafes/{cid}", status_code=303)
 

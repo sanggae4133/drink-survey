@@ -83,12 +83,30 @@ schema.sql        DDL. 제약(UNIQUE, CHECK, FK)이 비즈니스 규칙의 상�
 
 ```
 비로그인  → /login 만 접근 가능
-member    → 카페·메뉴 등록/수정, 조사 생성, 응답, 게스트 잔 추가, 스케줄 등록, 내 즐겨찾기
+member    → 카페·메뉴 등록/수정, 응답, 게스트 잔 추가, 내 즐겨찾기
+          → 조사 생성·스케줄 등록은 자기가 유효 멤버인 그룹(소속 그룹과 그 상위)에만
+disabled  → 모든 요청 거절(기존 쿠키 포함). 조사 대상·자동 채택에서도 제외
           → 본인이 만든 조사 마감 / 본인이 만든 스케줄 on·off / 본인이 추가한 게스트 잔 삭제
 admin     → 위 전부 + 회원 사전 등록·수정, 그룹 트리·멤버 관리, 모든 조사 마감, 모든 게스트 잔 삭제
 ```
 
 "카페와 메뉴는 누구나 수정"은 의도된 결정이다(위키 모델). 대신 `updated_by/updated_at`을 남긴다.
+
+## 앱 수준 방어
+
+| 위협 | 대응 |
+|---|---|
+| 세션 쿠키 위조 | itsdangerous 서명. 운영에서 기본 시크릿이면 기동 거부 |
+| CSRF | 쿠키 `SameSite=Lax` + 상태 변경은 전부 POST. 토큰 없음 |
+| XSS | Jinja2 자동 이스케이프. `menu_url`은 `http(s)://`만 허용(`javascript:` 차단) |
+| SQL 인젭션 | 전부 파라미터 바인딩. f-string은 `?` 개수 생성에만 |
+| 클릭재킹·MIME 스니핑 | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, 운영 HSTS |
+| 거대 요청 | Content-Length 64KB 초과 413. 옵션 JSON은 그룹·선택지 20개, 이름 40자 상한 |
+| 퇴사자 접근 | `status='disabled'` → `current_user`가 매 요청 거절 |
+| 관리자 잠금 | 자기 자신의 admin 해제·비활성화 불가 |
+| 라우트 노출 | 운영에서 `/docs`, `/openapi.json` 비활성. `--no-server-header` |
+
+받아들인 위험: 로그인한 회원은 소속과 무관하게 모든 조사·주문서를 열람할 수 있다(누가 뭘 마시는지). 부서 내부 도구라는 전제.
 
 ## 배포 토폴로지
 

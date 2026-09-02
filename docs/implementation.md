@@ -7,7 +7,7 @@
 
 ```
 app/
-  main.py          앱 조립. SessionMiddleware, 라우터 7개 include, import 시점에 init_db()
+  main.py          앱 조립. SessionMiddleware, 본문 64KB 상한·보안 헤더 미들웨어, 라우터 7개, import 시점에 init_db()
   config.py        환경변수 → 상수. OAUTH_CONFIGURED = client id/secret 둘 다 있을 때
   db.py            get_conn() / init_db() / db_dep() / now_str() / now_min()
   schema.sql       DDL 원본. CREATE ... IF NOT EXISTS 라 매 기동마다 실행해도 안전
@@ -56,23 +56,24 @@ run.sh             .env 로드 후 uvicorn
 | POST `/logout` | 로그인 | 세션 clear | `/login` |
 | GET `/` | 로그인 | `generate_due_surveys` → 내 그룹의 due 조사 `close_survey` → 목록 | |
 | GET `/surveys/new?from=ID` | 로그인 | 생성 폼. `from`이 있으면 그 조사 값 프리필("같게 만들기") | |
-| POST `/surveys` | 로그인 | 메뉴 있는 카페인지, 마감이 미래인지 검사 후 INSERT | `/surveys/{id}` |
+| POST `/surveys` | 대상 그룹 유효 멤버 또는 admin | 메뉴 있는 카페인지, 마감이 미래인지 검사 후 INSERT | `/surveys/{id}` |
 | GET `/surveys/{id}` | 로그인 | lazy 마감 → closed면 `/summary`로 303. 아니면 메뉴·옵션 폼·현황 | |
 | POST `/surveys/{id}/respond` | 유효 멤버 | `use_default`면 즐겨찾기로, 아니면 `menu_id` + `opt_{i}` 파싱. UPDATE→없으면 INSERT. `save_default`면 즐겨찾기 upsert | `/surveys/{id}` |
 | POST `/surveys/{id}/guests` | 유효 멤버, allow_guests | `guest_menu_id` + 필수 옵션 기본값으로 INSERT | `/surveys/{id}` |
 | POST `/surveys/{id}/guests/{rid}/delete` | 추가자·생성자·admin, open | DELETE | `/surveys/{id}` |
 | POST `/surveys/{id}/close` | 생성자·admin | `close_survey(due_only=False)` | `/summary` |
 | GET `/surveys/{id}/summary` | 로그인 | lazy 마감 → `build_summary`. open이면 "진행 중" 배지 | |
-| GET/POST `/cafes` | 로그인 | 목록 / 등록 | `/cafes/{id}` |
+| GET/POST `/cafes` | 로그인 | 목록 / 등록. `menu_url`은 http(s)만 | `/cafes/{id}` |
 | GET/POST `/cafes/{id}` | 로그인 | 상세·메뉴 목록 / 이름·링크·기본음료 수정 | |
 | POST `/cafes/{id}/menus` | 로그인 | 옵션 JSON 검증 후 INSERT | `/cafes/{id}` |
 | POST `/menus/{id}` | 로그인 | 검증 후 UPDATE + updated_by/at | `/cafes/{cafe}` |
-| GET/POST `/schedules` | 로그인 | 목록 / 등록 | |
+| GET/POST `/schedules` | 로그인 / 대상 그룹 유효 멤버 또는 admin | 목록 / 등록 | |
 | POST `/schedules/{id}/toggle` | 생성자·admin | enabled 반전 | |
 | GET `/me` | 로그인 | 내 즐겨찾기 목록 | |
 | POST `/me/defaults/{cafe_id}/delete` | 본인 | DELETE | `/me` |
 | GET/POST `/admin/users` | admin | 목록 / 사전 등록 | |
-| POST `/admin/users/{id}` | admin | 이름·역할 수정. active면 이메일 변경 거절 | |
+| POST `/admin/users/{id}` | admin | 이름·역할 수정. invited가 아니면 이메일 변경 거절. 자기 admin 해제 거절 | |
+| POST `/admin/users/{id}/toggle` | admin | disabled ↔ active/invited. 자기 자신 불가 | |
 | GET/POST `/admin/groups` | admin | 트리 + 멤버 체크박스 / 그룹 생성 | |
 | POST `/admin/groups/{id}` | admin | 이름·상위 변경. `creates_cycle`이면 거절 | |
 | POST `/admin/groups/{id}/members` | admin | 직속 멤버 전체 교체 (DELETE 후 INSERT) | |
@@ -109,7 +110,7 @@ run.sh             .env 로드 후 uvicorn
 | `SESSION_SECRET` | `dev-secret-change-me` | 세션 쿠키 서명. 운영은 반드시 교체 |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | 빈 값 | 둘 다 있어야 구글 로그인 버튼 활성 |
 | `ALLOWED_DOMAIN` | 빈 값 | 설정 시 이 도메인 이메일만 허용 + 구글 `hd` 힌트 |
-| `DEV_LOGIN` | `0` | `1`이면 dev 로그인 폼 노출 + `/docs` 활성 + 세션 쿠키 `Secure` 해제. 운영은 0 |
+| `DEV_LOGIN` | `0` | `1`이면 dev 로그인 폼 노출 + `/docs` 활성 + 세션 쿠키 `Secure`·HSTS 해제. `0`이면 기본 시크릿·OAuth 미설정 시 기동 거부 |
 | `PORT` | `8080` | run.sh만 사용 |
 
 `config.py`는 import 시점에 환경변수를 읽는다. 테스트가 `os.environ`을 먼저 세팅한 뒤 `app.main`을 import하는 이유.
@@ -120,7 +121,7 @@ run.sh             .env 로드 후 uvicorn
 DEV_LOGIN=1 python smoke_test.py
 ```
 
-- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 22 체크, 약 1초.
+- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 32 체크, 약 1초.
 - 단위 테스트 프레임워크 없음. `ok(cond, msg)` 하나. 실패하면 첫 실패에서 `AssertionError`로 멈춘다.
 - 시간 의존 테스트(마감, 스케줄)는 DB의 `deadline_at`을 직접 과거로 UPDATE해서 트리거한다.
 - 구글 OAuth 콜백은 테스트 안 함. dev 로그인이 같은 `invited→active` 경로를 탄다.

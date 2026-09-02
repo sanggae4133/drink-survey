@@ -19,3 +19,11 @@ ALLOWED_DOMAIN = os.environ.get("ALLOWED_DOMAIN", "")
 DEV_LOGIN = os.environ.get("DEV_LOGIN", "0") == "1"
 
 OAUTH_CONFIGURED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+
+# 운영(DEV_LOGIN=0) 기동 가드. 기본 시크릿이면 누구나 admin 세션 쿠키를 서명해 만들 수 있다.
+if not DEV_LOGIN:
+    if SESSION_SECRET == "dev-secret-change-me":
+        raise SystemExit("SESSION_SECRET이 기본값입니다. .env에 무작위 값을 넣으세요 "
+                         "(python -c 'import secrets;print(secrets.token_hex(32))')")
+    if not OAUTH_CONFIGURED:
+        raise SystemExit("DEV_LOGIN=0인데 GOOGLE_CLIENT_ID/SECRET이 없어 아무도 로그인할 수 없습니다")

@@ -6,14 +6,14 @@ from pydantic import BaseModel, Field, ValidationError
 
 
 class OptionChoice(BaseModel):
-    label: str = Field(min_length=1)
+    label: str = Field(min_length=1, max_length=40)
     delta: int = 0  # 가격 증감(원)
 
 
 class OptionGroup(BaseModel):
-    name: str = Field(min_length=1)      # 예: "온도"
-    required: bool = False               # true면 응답 시 반드시 선택
-    choices: List[OptionChoice] = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=40)   # 예: "온도"
+    required: bool = False                            # true면 응답 시 반드시 선택
+    choices: List[OptionChoice] = Field(min_length=1, max_length=20)
 
 
 OPTIONS_EXAMPLE = (
@@ -28,11 +28,12 @@ def parse_option_groups(raw: str) -> List[OptionGroup]:
     raw = (raw or "").strip() or "[]"
     try:
         data = json.loads(raw)
-        if not isinstance(data, list):
+        if not isinstance(data, list) or len(data) > 20:
             raise ValueError
         return [OptionGroup.model_validate(g) for g in data]
     except (json.JSONDecodeError, ValidationError, ValueError):
-        raise ValueError(f"옵션 JSON 형식이 잘못됐습니다. 예: {OPTIONS_EXAMPLE}")
+        raise ValueError("옵션 JSON 형식이 잘못됐습니다 (그룹·선택지 각 20개, 이름 40자 이내). "
+                         f"예: {OPTIONS_EXAMPLE}")
 
 
 def item_label(menu_name: str, selected: list[dict]) -> str:

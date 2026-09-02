@@ -71,6 +71,9 @@ def create_survey(request: Request,
     if not menu_count:
         flash(request, "그 카페에는 아직 메뉴가 없습니다. 메뉴를 먼저 등록하세요")
         return RedirectResponse("/surveys/new", status_code=303)
+    if user["role"] != "admin" and not services.is_effective_member(db, group_id, user["id"]):
+        flash(request, "자기가 속한 그룹(또는 그 상위 그룹)에만 조사를 열 수 있습니다")
+        return RedirectResponse("/surveys/new", status_code=303)
     deadline_at = f"{survey_date} {deadline_time}"
     if deadline_at <= now_min():
         flash(request, "마감 시각이 이미 지났습니다")

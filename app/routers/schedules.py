@@ -4,6 +4,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
+from .. import services
 from ..db import db_dep
 from ..deps import current_user, flash, render
 
@@ -34,13 +35,20 @@ def schedule_create(request: Request, group_id: int = Form(...), cafe_id: int = 
                     db: sqlite3.Connection = Depends(db_dep)):
     if not (0 <= weekday <= 6):
         raise HTTPException(400)
-    with db:
-        db.execute(
-            "INSERT INTO survey_schedules "
-            "(group_id, cafe_id, weekday, deadline_time, allow_guests, title_pattern, created_by) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (group_id, cafe_id, weekday, deadline_time,
-             1 if allow_guests else 0, title_pattern.strip() or None, user["id"]))
+    if user["role"] != "admin" and not services.is_effective_member(db, group_id, user["id"]):
+        flash(request, "자기가 속한 그룹(또는 그 상위 그룹)에만 스케줄을 걸 수 있습니다")
+        return RedirectResponse("/schedules", status_code=303)
+    try:
+        with db:
+            db.execute(
+                "INSERT INTO survey_schedules "
+                "(group_id, cafe_id, weekday, deadline_time, allow_guests, title_pattern, created_by) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (group_id, cafe_id, weekday, deadline_time,
+                 1 if allow_guests else 0, title_pattern.strip() or None, user["id"]))
+    except sqlite3.IntegrityError:  # 없는 카페 id 등 (FK)
+        flash(request, "그룹 또는 카페를 찾을 수 없습니다")
+        return RedirectResponse("/schedules", status_code=303)
     flash(request, "스케줄이 등록됐습니다. 해당 요일에 첫 접속이 조사를 만듭니다")
     return RedirectResponse("/schedules", status_code=303)
 

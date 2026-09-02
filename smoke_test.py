@@ -106,6 +106,11 @@ with TestClient(app):
     latte = q1("SELECT id FROM menus WHERE name='카페라떼'")["id"]
     admin.post(f"/cafes/{cafe}", data={"name": "카페 온도", "menu_url": "", "default_menu_id": str(ame)})
     ok(q1("SELECT default_menu_id d FROM cafes WHERE id=?", cafe)["d"] == ame, "공통 기본음료 지정")
+    admin.post(f"/cafes/{cafe}", data={"name": "카페 온도", "menu_url": "javascript:alert(1)"})
+    ok(q1("SELECT menu_url u FROM cafes WHERE id=?", cafe)["u"] is None, "menu_url은 http(s)만 — javascript: 거절")
+    r = admin.post(f"/cafes/{cafe}/menus", data={"name": "비대", "base_price": 1,
+                   "options": json.dumps([{"name": f"g{i}", "choices": [{"label": "x"}]} for i in range(21)])})
+    ok(q1("SELECT COUNT(*) n FROM menus WHERE name='비대'")["n"] == 0, "옵션 그룹 20개 초과 거절")
     admin.post(f"/menus/{latte}", data={"name": "카페라떼", "base_price": 4600,
                                         "options": temp_opt, "is_active": "1"})
     ok(q1("SELECT updated_by u FROM menus WHERE id=?", latte)["u"] == uid["admin@t.co"],
@@ -120,6 +125,15 @@ with TestClient(app):
                               "group_id": str(hq), "cafe_id": str(cafe),
                               "title": "스모크 조사", "allow_guests": "1"})
     sid = q1("SELECT id FROM surveys WHERE title='스모크 조사'")["id"]
+    admin.post("/admin/groups", data={"name": "타부서", "parent_group_id": ""})
+    other = q1("SELECT id FROM groups WHERE name='타부서'")["id"]
+    m1.post("/surveys", data={"survey_date": today, "deadline_time": deadline,
+                              "group_id": str(other), "cafe_id": str(cafe), "title": "남의 부서"})
+    m1.post("/schedules", data={"group_id": str(other), "cafe_id": str(cafe), "weekday": "0",
+                                "deadline_time": "10:00"})
+    ok(q1("SELECT COUNT(*) n FROM surveys WHERE title='남의 부서'")["n"] == 0
+       and q1("SELECT COUNT(*) n FROM survey_schedules")["n"] == 0,
+       "소속 아닌 그룹에 조사·스케줄 생성 거절")
 
     m1.post(f"/surveys/{sid}/respond", data={"menu_id": str(ame), "opt_0": "ICE",
                                              "opt_1": "+1샷", "save_default": "1"})
@@ -180,5 +194,29 @@ with TestClient(app):
     ok(len(created) == 1, "요일 당일 첫 접속이 조사 생성 (멱등, stale 스케줄은 건너뜀)")
     now = datetime.now()
     ok(created[0]["title"] == f"{now.month}/{now.day} 주간회의", "제목 패턴 {M/D} 치환")
+
+    print("== 7. 접근 회수·하드닝 ==")
+    m3 = client_for("m3@t.co")
+    admin.post(f"/admin/users/{uid['m3@t.co']}/toggle")
+    ok(m3.get("/", follow_redirects=False).status_code == 303, "비활성화된 계정은 기존 세션도 즉시 거절")
+    ok(TestClient(app).post("/auth/dev", data={"email": "m3@t.co"}, follow_redirects=False)
+       .headers["location"] == "/login" and
+       q1("SELECT status s FROM users WHERE email='m3@t.co'")["s"] == "disabled",
+       "비활성화된 계정은 재로그인 거절")
+    dbx = get_conn()
+    ok(all(m["email"] != "m3@t.co" for m in services.effective_members(dbx, hq)),
+       "비활성화 계정은 유효 멤버(조사 대상)에서 제외")
+    dbx.close()
+    admin.post(f"/admin/users/{uid['m3@t.co']}/toggle")
+    ok(q1("SELECT status s FROM users WHERE email='m3@t.co'")["s"] == "invited",
+       "복구 — 구글 연결 없던 계정은 invited로 (다음 로그인이 다시 active)")
+    admin.post(f"/admin/users/{uid['admin@t.co']}", data={"name": "관리자", "email": "admin@t.co", "role": "member"})
+    ok(q1("SELECT role r FROM users WHERE email='admin@t.co'")["r"] == "admin", "자기 자신 admin 권한 해제 거절")
+    r = admin.post("/cafes", content=b"x" * (65 * 1024),
+                   headers={"content-type": "application/x-www-form-urlencoded"})
+    ok(r.status_code == 413, "64KB 초과 본문 413")
+    r = admin.get("/")
+    ok(r.headers.get("x-frame-options") == "DENY" and r.headers.get("x-content-type-options") == "nosniff",
+       "보안 헤더")
 
     print(f"\nPASS {PASS} checks")

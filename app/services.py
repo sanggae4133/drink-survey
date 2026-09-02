@@ -27,6 +27,7 @@ def effective_members(db: sqlite3.Connection, group_id: int) -> list[sqlite3.Row
         FROM g
         JOIN group_members gm ON gm.group_id = g.id
         JOIN users u ON u.id = gm.user_id
+        WHERE u.status <> 'disabled'
         ORDER BY u.name
         """,
         (group_id,),

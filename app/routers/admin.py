@@ -48,13 +48,33 @@ def user_update(uid: int, request: Request, name: str = Form(...),
     if target is None or role not in ("member", "admin"):
         raise HTTPException(400)
     email = email.strip().lower()
-    if target["status"] == "active" and email != target["email"]:
+    if target["status"] != "invited" and email != target["email"]:
         flash(request, "이미 연결된 계정의 이메일은 바꿀 수 없습니다")
+        return RedirectResponse("/admin/users", status_code=303)
+    if uid == user["id"] and role != "admin":
+        flash(request, "자기 자신의 관리자 권한은 뺄 수 없습니다 (잠금 방지)")
         return RedirectResponse("/admin/users", status_code=303)
     with db:
         db.execute("UPDATE users SET name=?, email=?, role=? WHERE id=?",
                    (name.strip(), email, role, uid))
     flash(request, "저장했습니다")
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@router.post("/users/{uid}/toggle")
+def user_toggle(uid: int, request: Request, user: sqlite3.Row = Depends(require_admin),
+                db: sqlite3.Connection = Depends(db_dep)):
+    """비활성화 ↔ 복구. 복구 시 구글 연결이 없던 계정은 invited로 돌아간다."""
+    target = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if target is None or uid == user["id"]:
+        raise HTTPException(400)
+    if target["status"] == "disabled":
+        new = "active" if target["google_sub"] else "invited"
+    else:
+        new = "disabled"
+    with db:
+        db.execute("UPDATE users SET status=? WHERE id=?", (new, uid))
+    flash(request, "계정을 " + ("비활성화했습니다. 다음 요청부터 로그아웃됩니다" if new == "disabled" else "복구했습니다"))
     return RedirectResponse("/admin/users", status_code=303)
 
 

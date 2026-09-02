@@ -22,7 +22,7 @@ bash run.sh                             # http://127.0.0.1:8080
 ## 스모크 테스트
 
 ```bash
-python smoke_test.py        # 22개 체크: 로그인·트리·응답·게스트·lazy 마감·자동 채택·스케줄
+python smoke_test.py        # 32개 체크: 로그인·트리·응답·게스트·lazy 마감·자동 채택·스케줄
 ```
 
 ## 구조
@@ -74,7 +74,7 @@ After=network.target
 [Service]
 WorkingDirectory=/home/pi/drink-survey
 EnvironmentFile=/home/pi/drink-survey/.env
-ExecStart=/usr/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --limit-concurrency 32 --timeout-keep-alive 5
+ExecStart=/usr/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --limit-concurrency 32 --timeout-keep-alive 5 --no-server-header
 Restart=always
 User=pi
 
@@ -92,9 +92,14 @@ sudo tailscale funnel --bg 8080
 그러면 `https://<기기명>.<tailnet>.ts.net` 공개 URL이 뜬다(TLS 자동).
 
 ### 보안 체크리스트
-- `.env`: `SESSION_SECRET` 무작위 값, `DEV_LOGIN=0`, `ALLOWED_DOMAIN` 설정. 셋 중 하나라도 빠지면 로그인 벽이 무의미해진다.
-- `DEV_LOGIN=0`이면 `/docs`·`/openapi.json`이 꺼지고 세션 쿠키에 `Secure`가 붙는다. 비로그인 공개 경로는 `/login`, `/auth/*`, `/logout`만 남는다.
-- uvicorn `--limit-concurrency 32 --timeout-keep-alive 5`: Pi가 느린 연결 붙잡기에 버티도록.
+- `.env`: `SESSION_SECRET` 무작위 값, `DEV_LOGIN=0`, `ALLOWED_DOMAIN` 설정. `DEV_LOGIN=0`인데 시크릿이 기본값이거나
+  OAuth 설정이 없으면 **앱이 기동을 거부한다**(의도된 동작).
+- `chmod 600 .env drink_survey.db` — 둘 다 비밀(세션 서명 키, 회원 이메일).
+- `DEV_LOGIN=0`이면 `/docs`·`/openapi.json`이 꺼지고 세션 쿠키에 `Secure`, 응답에 HSTS가 붙는다.
+  비로그인 공개 경로는 `/login`, `/auth/*`, `/logout`만 남는다.
+- uvicorn `--limit-concurrency 32 --timeout-keep-alive 5 --no-server-header`: 느린 연결 붙잡기 방어, 서버 소프트웨어 노출 제거.
+- 퇴사자 접근 회수: 회원 관리 → **비활성화**. 이미 로그인된 브라우저도 다음 요청부터 로그아웃된다.
+- 의존성은 `>=`로 열려 있다. 운영 설치 후 `pip freeze > requirements.lock`으로 고정해 두고 업데이트는 의식적으로.
 - `.ts.net` 도메인은 인증서 투명성 로그에 올라가 봇이 찾아온다. "비공개 URL"이 아니다.
 - 인터넷 노출 자체를 없애려면 Funnel 대신 `tailscale serve`(tailnet 내부 전용). 단, 부서원 전원이 Tailscale을 써야 한다.
 

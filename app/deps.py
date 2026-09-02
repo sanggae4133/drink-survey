@@ -19,7 +19,7 @@ def current_user(request: Request, db: sqlite3.Connection = Depends(db_dep)) -> 
     if not uid:
         raise _login_redirect()
     user = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
-    if user is None:
+    if user is None or user["status"] == "disabled":  # 비활성화는 기존 쿠키에도 즉시 적용
         request.session.clear()
         raise _login_redirect()
     return user

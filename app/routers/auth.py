@@ -7,6 +7,7 @@
 """
 import sqlite3
 
+from authlib.integrations.base_client import OAuthError
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
@@ -52,7 +53,13 @@ async def google_login(request: Request):
 
 @router.get("/auth/callback")
 async def google_callback(request: Request, db: sqlite3.Connection = Depends(db_dep)):
-    token = await oauth.google.authorize_access_token(request)
+    if not oauth:
+        return RedirectResponse("/login", status_code=303)
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except OAuthError:  # state 불일치, 사용자 취소, 만료된 code 등 — 500 대신 로그인 화면으로
+        flash(request, "구글 로그인에 실패했습니다. 다시 시도해 주세요")
+        return RedirectResponse("/login", status_code=303)
     info = token.get("userinfo") or {}
     sub, email = info.get("sub"), (info.get("email") or "").lower()
     name = info.get("name") or email
@@ -65,8 +72,8 @@ async def google_callback(request: Request, db: sqlite3.Connection = Depends(db_
         return RedirectResponse("/login", status_code=303)
 
     user = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
-    if user is None:
-        flash(request, "등록되지 않은 계정입니다. 관리자에게 등록을 요청하세요")
+    if user is None or user["status"] == "disabled":
+        flash(request, "등록되지 않았거나 비활성화된 계정입니다. 관리자에게 문의하세요")
         return RedirectResponse("/login", status_code=303)
     if user["google_sub"] is None:
         with db:
@@ -88,8 +95,8 @@ def dev_login(request: Request, email: str = Form(...), db: sqlite3.Connection =
     if not config.DEV_LOGIN:
         return RedirectResponse("/login", status_code=303)
     user = db.execute("SELECT * FROM users WHERE email=?", (email.strip().lower(),)).fetchone()
-    if user is None:
-        flash(request, "등록되지 않은 계정입니다. 관리자에게 등록을 요청하세요")
+    if user is None or user["status"] == "disabled":
+        flash(request, "등록되지 않았거나 비활성화된 계정입니다. 관리자에게 문의하세요")
         return RedirectResponse("/login", status_code=303)
     if user["status"] == "invited":
         with db:
