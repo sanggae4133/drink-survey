@@ -10,18 +10,18 @@ from .db import db_dep
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
-class LoginRequired(Exception):
-    """main.py의 핸들러가 /login으로 리다이렉트한다."""
+def _login_redirect() -> HTTPException:
+    return HTTPException(status_code=303, headers={"Location": "/login"})
 
 
 def current_user(request: Request, db: sqlite3.Connection = Depends(db_dep)) -> sqlite3.Row:
     uid = request.session.get("user_id")
     if not uid:
-        raise LoginRequired()
+        raise _login_redirect()
     user = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
     if user is None:
         request.session.clear()
-        raise LoginRequired()
+        raise _login_redirect()
     return user
 
 

@@ -85,6 +85,10 @@ with TestClient(app):
     eff = services.effective_members(dbx, hq)
     dbx.close()
     ok(len(eff) == 5, f"본부 유효 멤버 = 직속 1 + 팀 4 = {len(eff)}")
+    admin.post(f"/admin/groups/{hq}/delete")
+    admin.post("/admin/groups", data={"name": "빈그룹", "parent_group_id": ""})
+    admin.post(f"/admin/groups/{q1("SELECT id FROM groups WHERE name='빈그룹'")['id']}/delete")
+    ok(q1("SELECT COUNT(*) n FROM groups")["n"] == 2, "하위 그룹 있는 그룹 삭제 거절(FK), 빈 그룹은 삭제")
 
     print("== 3. 카페·메뉴 ==")
     admin.post("/cafes", data={"name": "카페 온도", "menu_url": ""})

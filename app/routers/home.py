@@ -4,7 +4,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, Request
 
 from .. import services
-from ..db import db_dep
+from ..db import db_dep, now_min
 from ..deps import current_user, render
 
 router = APIRouter(tags=["home"])
@@ -19,9 +19,11 @@ def home(request: Request, user: sqlite3.Row = Depends(current_user),
     surveys_open, surveys_closed = [], []
     if group_ids:
         ph = ",".join("?" * len(group_ids))
-        ids = [r["id"] for r in db.execute(
-            f"SELECT id FROM surveys WHERE group_id IN ({ph}) AND status='open'", group_ids)]
-        services.lazy_close_due(db, ids)
+        due = db.execute(
+            f"SELECT id FROM surveys WHERE group_id IN ({ph}) AND status='open' AND deadline_at <= ?",
+            [*group_ids, now_min()]).fetchall()
+        for r in due:
+            services.close_survey(db, r["id"])
 
         base = (
             "SELECT s.*, g.name AS group_name, c.name AS cafe_name, "

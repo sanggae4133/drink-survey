@@ -16,13 +16,6 @@ class OptionGroup(BaseModel):
     choices: List[OptionChoice] = Field(min_length=1)
 
 
-class SelectedOption(BaseModel):
-    """응답에 저장되는 선택 스냅샷."""
-    name: str
-    choice: str
-    delta: int = 0
-
-
 OPTIONS_EXAMPLE = (
     '[{"name": "온도", "required": true, '
     '"choices": [{"label": "HOT", "delta": 0}, {"label": "ICE", "delta": 0}]}, '
@@ -42,11 +35,7 @@ def parse_option_groups(raw: str) -> List[OptionGroup]:
         raise ValueError(f"옵션 JSON 형식이 잘못됐습니다. 예: {OPTIONS_EXAMPLE}")
 
 
-def selected_label(selected: list[dict]) -> str:
-    """선택 옵션을 표시용 문자열로: 'HOT, +1샷'."""
-    return ", ".join(s["choice"] for s in selected)
-
-
 def item_label(menu_name: str, selected: list[dict]) -> str:
-    lab = selected_label(selected)
+    """'아메리카노 (HOT, +1샷)'"""
+    lab = ", ".join(s["choice"] for s in selected)
     return f"{menu_name} ({lab})" if lab else menu_name

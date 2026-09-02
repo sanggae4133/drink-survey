@@ -85,18 +85,12 @@ def create_survey(request: Request,
     return RedirectResponse(f"/surveys/{sid}", status_code=303)
 
 
-@router.get("/{sid}/clone")
-def clone_survey(sid: int, user: sqlite3.Row = Depends(current_user)):
-    """'지난 조사와 같게' — 생성 폼에 프리필로 진입."""
-    return RedirectResponse(f"/surveys/new?from={sid}", status_code=303)
-
-
 # ------------------------------------------------------------------ 상세/응답
 
 @router.get("/{sid}")
 def survey_detail(sid: int, request: Request, user: sqlite3.Row = Depends(current_user),
                   db: sqlite3.Connection = Depends(db_dep)):
-    services.maybe_close_survey(db, sid)
+    services.close_survey(db, sid)
     survey = _get_survey(db, sid)
     if survey["status"] == "closed":
         return RedirectResponse(f"/surveys/{sid}/summary", status_code=303)
@@ -127,7 +121,7 @@ def survey_detail(sid: int, request: Request, user: sqlite3.Row = Depends(curren
 @router.post("/{sid}/respond")
 async def respond(sid: int, request: Request, user: sqlite3.Row = Depends(current_user),
                   db: sqlite3.Connection = Depends(db_dep)):
-    services.maybe_close_survey(db, sid)
+    services.close_survey(db, sid)
     survey = _get_survey(db, sid)
     if survey["status"] != "open":
         flash(request, "이미 마감된 조사입니다")
@@ -186,7 +180,7 @@ async def respond(sid: int, request: Request, user: sqlite3.Row = Depends(curren
 @router.post("/{sid}/guests")
 async def add_guest(sid: int, request: Request, user: sqlite3.Row = Depends(current_user),
                     db: sqlite3.Connection = Depends(db_dep)):
-    services.maybe_close_survey(db, sid)
+    services.close_survey(db, sid)
     survey = _get_survey(db, sid)
     if survey["status"] != "open" or not survey["allow_guests"]:
         flash(request, "게스트 잔을 추가할 수 없는 조사입니다")
@@ -201,18 +195,7 @@ async def add_guest(sid: int, request: Request, user: sqlite3.Row = Depends(curr
                           (int(form["guest_menu_id"]), survey["cafe_id"])).fetchone()
         if menu is None:
             raise ValueError("메뉴를 찾을 수 없습니다")
-        groups = models.parse_option_groups(menu["options"])
-        sel = []
-        for i, g in enumerate(groups):
-            v = (form.get(f"gopt_{i}") or "").strip()
-            if not v:
-                if g.required:
-                    sel.append({"name": g.name, "choice": g.choices[0].label,
-                                "delta": g.choices[0].delta})
-                continue
-            choice = next((c for c in g.choices if c.label == v), None)
-            if choice:
-                sel.append({"name": g.name, "choice": choice.label, "delta": choice.delta})
+        sel = services.default_selection(menu)  # 게스트 잔은 필수 옵션 기본값으로
     except (ValueError, KeyError) as e:
         flash(request, str(e) or "입력이 잘못됐습니다")
         return RedirectResponse(f"/surveys/{sid}", status_code=303)
@@ -257,14 +240,14 @@ def close_survey(sid: int, request: Request, user: sqlite3.Row = Depends(current
     if not _can_manage(user, survey):
         flash(request, "조사 생성자나 관리자만 마감할 수 있습니다")
         return RedirectResponse(f"/surveys/{sid}", status_code=303)
-    services.close_now(db, sid)
+    services.close_survey(db, sid, due_only=False)
     return RedirectResponse(f"/surveys/{sid}/summary", status_code=303)
 
 
 @router.get("/{sid}/summary")
 def survey_summary(sid: int, request: Request, user: sqlite3.Row = Depends(current_user),
                    db: sqlite3.Connection = Depends(db_dep)):
-    services.maybe_close_survey(db, sid)
+    services.close_survey(db, sid)
     survey = _get_survey(db, sid)
     summary = services.build_summary(db, sid)
     return render(request, "survey_summary.html", user=user, survey=survey, s=summary,

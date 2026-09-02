@@ -57,16 +57,12 @@
   {% endfor %}
 </table>
 </div>
-<p style="margin-top:16px"><a href="/surveys/{{ survey['id'] }}/clone">이 조사와 같게 새로 만들기</a></p>
+<p style="margin-top:16px"><a href="/surveys/new?from={{ survey['id'] }}">이 조사와 같게 새로 만들기</a></p>
 
 <script>
 function copyOrder(){
-  const t = document.getElementById('copytext');
-  t.select();
-  navigator.clipboard.writeText(t.value).then(
-    () => document.getElementById('copied').textContent = '복사됨',
-    () => { document.execCommand('copy'); document.getElementById('copied').textContent = '복사됨'; }
-  );
+  navigator.clipboard.writeText(document.getElementById('copytext').value)
+    .then(() => document.getElementById('copied').textContent = '복사됨');
 }
 </script>
 {% endblock %}

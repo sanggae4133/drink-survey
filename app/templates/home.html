@@ -32,7 +32,7 @@
     <td><a href="/surveys/{{ s['id'] }}/summary">{{ s['title'] or '-' }}</a></td>
     <td>{{ s['group_name'] }}</td>
     <td>{{ s['cafe_name'] }}</td>
-    <td><a href="/surveys/{{ s['id'] }}/clone" class="muted">같게 만들기</a></td>
+    <td><a href="/surveys/new?from={{ s['id'] }}" class="muted">같게 만들기</a></td>
   </tr>
   {% endfor %}
 </table>

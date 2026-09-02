@@ -40,7 +40,3 @@ def now_str() -> str:
 def now_min() -> str:
     """분 단위 현재 시각 — deadline_at 비교용 ('YYYY-MM-DD HH:MM')."""
     return datetime.now().strftime("%Y-%m-%d %H:%M")
-
-
-def today_str() -> str:
-    return datetime.now().strftime("%Y-%m-%d")

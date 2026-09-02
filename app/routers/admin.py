@@ -123,13 +123,10 @@ async def group_members_update(gid: int, request: Request,
 @router.post("/groups/{gid}/delete")
 def group_delete(gid: int, request: Request, user: sqlite3.Row = Depends(require_admin),
                  db: sqlite3.Connection = Depends(db_dep)):
-    child = db.execute("SELECT 1 FROM groups WHERE parent_group_id=?", (gid,)).fetchone()
-    used = db.execute("SELECT 1 FROM surveys WHERE group_id=?", (gid,)).fetchone()
-    sched = db.execute("SELECT 1 FROM survey_schedules WHERE group_id=?", (gid,)).fetchone()
-    if child or used or sched:
-        flash(request, "하위 그룹·조사·스케줄이 있는 그룹은 삭제할 수 없습니다")
-    else:
+    try:  # 하위 그룹·조사·스케줄의 FK가 막는다 (PRAGMA foreign_keys=ON)
         with db:
             db.execute("DELETE FROM groups WHERE id=?", (gid,))
         flash(request, "그룹을 삭제했습니다")
+    except sqlite3.IntegrityError:
+        flash(request, "하위 그룹·조사·스케줄이 있는 그룹은 삭제할 수 없습니다")
     return RedirectResponse("/admin/groups", status_code=303)

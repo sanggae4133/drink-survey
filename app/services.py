@@ -9,26 +9,10 @@ import sqlite3
 from datetime import datetime
 
 from . import models
-from .db import now_min, now_str, today_str
+from .db import now_min, now_str
 
 
 # ---------------------------------------------------------------- 그룹 트리
-
-def descendant_group_ids(db: sqlite3.Connection, group_id: int) -> list[int]:
-    """자기 자신 포함, 모든 하위 그룹 id (재귀 CTE)."""
-    rows = db.execute(
-        """
-        WITH RECURSIVE g(id) AS (
-          SELECT ?
-          UNION
-          SELECT groups.id FROM groups JOIN g ON groups.parent_group_id = g.id
-        )
-        SELECT id FROM g
-        """,
-        (group_id,),
-    ).fetchall()
-    return [r["id"] for r in rows]
-
 
 def effective_members(db: sqlite3.Connection, group_id: int) -> list[sqlite3.Row]:
     """유효 멤버 = 직속 멤버 ∪ 모든 하위 그룹 멤버 (중복 제거)."""
@@ -74,12 +58,21 @@ def user_visible_group_ids(db: sqlite3.Connection, user_id: int) -> list[int]:
 def creates_cycle(db: sqlite3.Connection, group_id: int, new_parent_id: int | None) -> bool:
     """group_id의 상위를 new_parent_id로 바꿀 때 순환이 생기는지.
 
-    새 상위가 자기 자신이거나 자기 자손이면 순환이다
-    (descendant_group_ids는 자기 자신을 포함한다).
+    새 상위가 자기 자신이거나 자기 자손이면 순환이다.
     """
     if new_parent_id is None:
         return False
-    return new_parent_id in descendant_group_ids(db, group_id)
+    return db.execute(
+        """
+        WITH RECURSIVE g(id) AS (
+          SELECT ?
+          UNION
+          SELECT groups.id FROM groups JOIN g ON groups.parent_group_id = g.id
+        )
+        SELECT 1 FROM g WHERE id = ?
+        """,
+        (group_id, new_parent_id),
+    ).fetchone() is not None
 
 
 def group_tree(db: sqlite3.Connection) -> list[dict]:
@@ -96,11 +89,6 @@ def group_tree(db: sqlite3.Connection) -> list[dict]:
             walk(g["id"], depth + 1)
 
     walk(None, 0)
-    # 순환 등으로 누락된 행 방어적으로 뒤에 붙임
-    seen = {o["row"]["id"] for o in out}
-    for r in rows:
-        if r["id"] not in seen:
-            out.append({"row": r, "depth": 0})
     return out
 
 
@@ -123,27 +111,19 @@ def default_selection(menu: sqlite3.Row) -> list[dict]:
 
 # ---------------------------------------------------------------- lazy 마감
 
-def maybe_close_survey(db: sqlite3.Connection, survey_id: int) -> None:
-    """마감시각이 지났으면 마감 + 자동 채택. CAS UPDATE라 동시 요청에도 한 번만 실행."""
+def close_survey(db: sqlite3.Connection, survey_id: int, due_only: bool = True) -> None:
+    """마감 + 자동 채택. due_only=True면 마감시각이 지난 경우만(lazy), False면 수동 즉시 마감.
+
+    CAS UPDATE라 동시 요청에도 한 번만 실행된다.
+    """
+    cond = " AND deadline_at <= ?" if due_only else ""
+    args = (survey_id, now_min()) if due_only else (survey_id,)
     with db:
         cur = db.execute(
-            "UPDATE surveys SET status='closed' WHERE id=? AND status='open' AND deadline_at <= ?",
-            (survey_id, now_min()),
+            f"UPDATE surveys SET status='closed' WHERE id=? AND status='open'{cond}", args
         )
         if cur.rowcount:
             _autofill(db, survey_id)
-
-
-def close_now(db: sqlite3.Connection, survey_id: int) -> bool:
-    """수동 마감 (권한 검증은 라우터에서). 이미 닫혀 있으면 False."""
-    with db:
-        cur = db.execute(
-            "UPDATE surveys SET status='closed' WHERE id=? AND status='open'", (survey_id,)
-        )
-        if cur.rowcount:
-            _autofill(db, survey_id)
-            return True
-    return False
 
 
 def _autofill(db: sqlite3.Connection, survey_id: int) -> None:
@@ -191,18 +171,6 @@ def _autofill(db: sqlite3.Connection, survey_id: int) -> None:
             (survey_id, m["id"], menu["id"], json.dumps(sel, ensure_ascii=False),
              compute_price(menu, sel), m["id"]),
         )
-
-
-def lazy_close_due(db: sqlite3.Connection, survey_ids: list[int]) -> None:
-    """목록 화면 등에서 여러 조사를 한 번에 lazy 마감."""
-    now = now_min()
-    due = db.execute(
-        f"SELECT id FROM surveys WHERE status='open' AND deadline_at <= ? "
-        f"AND id IN ({','.join('?' * len(survey_ids))})",
-        [now, *survey_ids],
-    ).fetchall() if survey_ids else []
-    for r in due:
-        maybe_close_survey(db, r["id"])
 
 
 # ---------------------------------------------------------------- lazy 스케줄 생성
