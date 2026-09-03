@@ -64,8 +64,7 @@ def new_survey(request: Request, user: sqlite3.Row = Depends(current_user),
         "FROM cafes c WHERE c.is_active=1 ORDER BY c.name").fetchall()
     default = datetime.now() + timedelta(hours=1)  # 마감 기본값: 지금부터 1시간 뒤 (자정 넘으면 날짜도 내일)
     return render(request, "survey_new.html", user=user, groups=groups, cafes=cafes, src=src,
-                  today=default.strftime("%Y-%m-%d"), default_time=default.strftime("%H:%M"),
-                  default_remind=",".join(map(str, sorted(config.REMIND_MINUTES, reverse=True))) or "없음")
+                  today=default.strftime("%Y-%m-%d"), default_time=default.strftime("%H:%M"))
 
 
 @router.post("")

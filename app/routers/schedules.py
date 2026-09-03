@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from .. import config, services
+from .. import services
 from ..db import db_dep
 from ..deps import current_user, flash, render
 
@@ -23,8 +23,7 @@ def schedules_list(request: Request, user: sqlite3.Row = Depends(current_user),
     groups = db.execute("SELECT * FROM groups ORDER BY name").fetchall()
     cafes = db.execute("SELECT * FROM cafes WHERE is_active=1 ORDER BY name").fetchall()
     return render(request, "schedules.html", user=user, scheds=scheds, groups=groups, cafes=cafes,
-                  weekdays=services.KR_WEEKDAYS,
-                  remind_minutes="·".join(str(m) for m in sorted(config.REMIND_MINUTES, reverse=True)) or "(없음)")
+                  weekdays=services.KR_WEEKDAYS)
 
 
 @router.post("")

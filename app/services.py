@@ -262,7 +262,7 @@ def generate_due_surveys(db: sqlite3.Connection) -> None:
 
 
 def effective_remind_minutes(db: sqlite3.Connection, survey) -> tuple:
-    """조사 → 그룹(가장 가까운 상위 순) → .env 기본값. 첫 번째로 값이 있는 곳을 쓴다."""
+    """조사 → 그룹(가장 가까운 상위 순). 어디에도 없으면 리마인더 없음. 첫 번째로 값이 있는 곳을 쓴다."""
     if survey["remind_minutes"] is not None:
         return config.parse_minutes(survey["remind_minutes"])
     g = db.execute("SELECT * FROM groups WHERE id=?", (survey["group_id"],)).fetchone()
@@ -271,11 +271,11 @@ def effective_remind_minutes(db: sqlite3.Connection, survey) -> tuple:
             return config.parse_minutes(g["remind_minutes"])
         g = (db.execute("SELECT * FROM groups WHERE id=?", (g["parent_group_id"],)).fetchone()
              if g["parent_group_id"] else None)
-    return config.REMIND_MINUTES
+    return ()  # 기본은 안 보냄. 보내려면 조사·스케줄·그룹 어딘가에 적어야 한다
 
 
 def remind_due(db: sqlite3.Connection) -> None:
-    """마감 N분 전 리마인더 (N은 config.REMIND_MINUTES, 기본 30·10).
+    """마감 N분 전 리마인더 (N은 조사·그룹에 설정된 값, 없으면 안 보냄).
 
     reminded_at은 '마지막 리마인더를 보낸 시각'. 어떤 시점(threshold = 마감-N분)에 대해
     now >= threshold 이고 reminded_at < threshold 이면 아직 그 시점 알림을 안 보낸 것이다.

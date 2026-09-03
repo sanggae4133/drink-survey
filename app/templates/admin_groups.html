@@ -16,8 +16,8 @@
   <p class="muted">본부 그룹으로 조사를 열면 하위 팀 멤버 전체(중복 제거)가 응답 대상이 됩니다.<br>
   <b>텔레그램 알림</b>: 봇을 그룹 채팅에 초대하고 그 채팅의 chat_id를 넣으면 조사 생성·마감 때 알림이 갑니다.
   chat_id가 없는 그룹은 가장 가까운 상위 그룹의 채팅으로, 상위에도 없으면 하위 그룹 채팅들로 갑니다. (.env에 TELEGRAM_BOT_TOKEN 필요)<br>
-  <b>리마인더 분</b>: 마감 몇 분 전에 미응답자 리마인더를 보낼지. <code>30,10</code>처럼 여러 개, <code>0</code>은 끔, 빈칸은 상위 그룹 → .env 기본값을 따릅니다.
-  조사마다 따로 정할 수도 있습니다.</p>
+  <b>분 전 알림</b>: 이 그룹의 조사가 마감되기 몇 분 전에 미응답자 텔레그램 알림을 보낼지. <code>30,10</code>이면 30분 전과 10분 전 두 번,
+  <code>0</code>은 끔, 비우면 상위 그룹 설정을 따르고 어디에도 없으면 보내지 않습니다. 조사·스케줄에서 따로 정하면 그쪽이 우선입니다.</p>
 </div>
 
 {% for t in tree %}
@@ -35,7 +35,8 @@
       </select>
     </label>
     <input name="telegram_chat_id" value="{{ g['telegram_chat_id'] or '' }}" placeholder="텔레그램 chat_id (선택)" style="width:190px">
-    <input name="remind_minutes" value="{{ g['remind_minutes'] or '' }}" placeholder="리마인더 분 (빈칸=상속)" style="width:150px" title="예: 30,10 / 0이면 끔 / 빈칸이면 상위 그룹 또는 기본값">
+    <label>마감 <input name="remind_minutes" value="{{ g['remind_minutes'] or '' }}" placeholder="예: 30,10" style="width:110px"
+           title="이 그룹 조사의 마감 몇 분 전에 미응답자 텔레그램 알림을 보낼지. 비우면 상위 그룹 설정, 없으면 안 보냄. 0이면 끔"> 분 전 알림</label>
     <span class="badge">유효 멤버 {{ eff_count[g['id']] }}명</span>
     <button class="ghost">저장</button>
   </form>

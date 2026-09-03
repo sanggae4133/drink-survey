@@ -32,8 +32,10 @@
              {% if src and src['allow_guests'] %}checked{% endif %}> 게스트 잔 허용</label>
     </div>
     <div class="row" style="margin-bottom:10px">
-      <label>리마인더 <input name="remind_minutes" value="{{ src['remind_minutes'] or '' if src else '' }}"
-             placeholder="빈칸=그룹 설정 (기본 {{ default_remind }})" style="width:220px" title="마감 몇 분 전. 예: 30,10 / 0이면 끔"></label>
+      <label>마감 몇 분 전에 텔레그램 알림? <input name="remind_minutes" value="{{ src['remind_minutes'] or '' if src else '' }}"
+             placeholder="예: 30,10" style="width:120px"> 분 전</label>
+      <span class="muted">미응답자가 있으면 그 시각에 그룹 텔레그램으로 알립니다. <code>30,10</code>이면 마감 30분 전과 10분 전 두 번.
+        비우면 그룹 설정을 따르고, 그룹에도 없으면 알림을 보내지 않습니다. <code>0</code>은 이 조사에서 끄기.</span>
     </div>
     <button class="primary">조사 시작</button>
     <span class="muted">매주 반복하려면 <a href="/schedules">스케줄</a>로 등록하세요</span>

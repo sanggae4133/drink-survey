@@ -42,13 +42,6 @@ def parse_minutes(raw: str) -> tuple:
         raise ValueError
     return tuple(sorted(mins))
 
-
-# 마감 N분 전 리마인더 시점의 전체 기본값 (쉼표 구분). 그룹·조사에서 덮어쓸 수 있다. 빈 값 또는 0이면 없음.
-try:
-    REMIND_MINUTES = parse_minutes(os.environ.get("REMIND_MINUTES", "30,10"))
-except ValueError:
-    raise SystemExit("REMIND_MINUTES는 쉼표로 구분한 양의 정수여야 합니다 (예: 30,10)")
-
 # 운영(DEV_LOGIN=0) 기동 가드. 기본 시크릿이면 누구나 admin 세션 쿠키를 서명해 만들 수 있다.
 if not DEV_LOGIN:
     if SESSION_SECRET == "dev-secret-change-me":

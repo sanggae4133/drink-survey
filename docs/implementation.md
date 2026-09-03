@@ -45,7 +45,7 @@ run.sh             .env 로드 후 uvicorn
 | `_autofill(db, sid)` | 미응답 active 멤버에 즐겨찾기 → 기본음료 → 제외 순으로 `is_auto=1` 응답 INSERT | `close_survey` 안에서만 |
 | `generate_due_surveys(db)` | 오늘 요일 스케줄 → stale skip → `INSERT OR IGNORE` → 생성 시 `announce` | tick, 홈 |
 | `tick()` | 커넥션 열고 `generate_due_surveys` + `remind_due` + 마감 지난 조사 전부 `close_survey` | main.py 스케줄러(60초) |
-| `effective_remind_minutes(db, survey)` | 조사 → 그룹 상위 순 → .env 로 리마인더 시점 결정 | `remind_due`, 상세 화면 |
+| `effective_remind_minutes(db, survey)` | 조사 → 그룹 상위 순으로 리마인더 시점 결정, 없으면 `()` | `remind_due`, 상세 화면 |
 | `remind_minutes_from_form(raw)` | 폼 입력 검증: 빈칸→None, '0'→끔, '30,10'→그대로, 그 외 ValueError | 조사·스케줄·그룹 폼 |
 | `remind_due(db)` | 열린 조사마다 유효 리마인더 시점 중 지났고 아직 안 보낸 가장 임박한 것 → `reminded_at` CAS → `announce("reminder")` | tick |
 | `notify_targets(db, gid)` | 알림 chat_id 목록: 자신→상위 중 첫 하나, 없으면 하위로 내려가며 | `announce` |
@@ -133,7 +133,6 @@ run.sh             .env 로드 후 uvicorn
 | `DEV_LOGIN` | `0` | `1`이면 dev 로그인 폼 노출 + `/docs` 활성 + 세션 쿠키 `Secure`·HSTS 해제. `0`이면 기본 시크릿·OAuth 미설정 시 기동 거부 |
 | `TELEGRAM_BOT_TOKEN` | 빈 값 | 있으면 조사 생성·마감 알림 활성 |
 | `APP_URL` | 빈 값 | 알림 메시지 링크의 기준 URL (Funnel 주소) |
-| `REMIND_MINUTES` | `30,10` | 리마인더 시점의 전체 기본값. 그룹·스케줄·조사에서 덮어씀. 빈 값 또는 `0`이면 없음 |
 | `PORT` | `8080` | run.sh만 사용 |
 
 `config.py`는 import 시점에 프로젝트 루트 `.env`를 읽어 **없는 키만** `os.environ`에 넣고(setdefault), 그다음 환경변수를 읽는다.
@@ -146,7 +145,7 @@ run.sh             .env 로드 후 uvicorn
 DEV_LOGIN=1 python smoke_test.py
 ```
 
-- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 70 체크, 약 1초.
+- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 71 체크, 약 1초.
 - 단위 테스트 프레임워크 없음. `ok(cond, msg)` 하나. 실패하면 첫 실패에서 `AssertionError`로 멈춘다.
 - 시간 의존 테스트(마감, 스케줄)는 DB의 `deadline_at`을 직접 과거로 UPDATE해서 트리거한다.
 - 구글 OAuth 콜백은 테스트 안 함. dev 로그인이 같은 `invited→active` 경로를 탄다.
@@ -164,7 +163,7 @@ DEV_LOGIN=1 python smoke_test.py
 | 게스트 잔에 옵션 선택 추가 | `survey_detail.html` 게스트 폼에 라디오 추가 + `add_guest`에서 `default_selection` 대신 `_parse_selection` 사용 |
 | 옵션 편집기에 항목 추가(예: 선택지 설명) | `cafe_detail.html`의 `opt_row` 매크로 + `cafes._options_from_form` + `models.OptionChoice` 세 곳 |
 | 새 권한 규칙 | 라우터 핸들러 상단. `_can_manage` 패턴 참고 |
-| 리마인더 시점 변경 | 전체: `.env` `REMIND_MINUTES`. 팀별: 그룹 관리. 조사별: 조사 만들기 폼 또는 스케줄 |
+| 리마인더 시점 | 팀별: 그룹 관리. 조사별: 조사 만들기 폼 또는 스케줄. 전역 기본값 없음(기본 꺼짐) |
 | 알림 채널 추가(슬랙 등) | `services.announce`의 전송 부분만. 대상 선택(`notify_targets`)은 그대로 |
 | 시간대 지원 | 전 컬럼이 로컬 문자열이라 큰 변경. 그 전에 정말 필요한지부터 |
 

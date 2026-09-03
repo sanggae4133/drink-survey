@@ -271,7 +271,7 @@ with TestClient(app):
     real_announce = services.announce
     services.announce = lambda db, sid, kind: sent.append((sid, kind)) or 1  # 보낸 채팅 1개로 위장
     m1.post("/surveys", data={"survey_date": today, "deadline_time": deadline, "group_id": str(team),
-                              "cafe_id": str(cafe), "title": "리마인더 조사"})
+                              "cafe_id": str(cafe), "title": "리마인더 조사", "remind_minutes": "30,10"})
     rid = q1("SELECT id FROM surveys WHERE title='리마인더 조사'")["id"]
     dbw = get_conn()
     with dbw:  # 마감 20분 전, 조사는 1시간 전에 만들어진 상태로
@@ -290,13 +290,17 @@ with TestClient(app):
     dbw.close()
     services.tick(); services.tick()
     ok(sent.count((rid, "reminder")) == 2, "마감 10분 전 리마인더 — 역시 한 번만")
-    # 리마인더 시점 상속: 조사 → 그룹(상위 순) → .env
+    # 리마인더 시점 상속: 조사 → 그룹(상위 순) → 없으면 안 보냄
     dbx = get_conn()
     sv = dbx.execute("SELECT * FROM surveys WHERE id=?", (rid,)).fetchone()
-    ok(services.effective_remind_minutes(dbx, sv) == (10, 30), "리마인더 기본값(.env 30,10)")
+    ok(services.effective_remind_minutes(dbx, sv) == (10, 30), "조사에 적은 리마인더 값")
+    with dbx:
+        dbx.execute("UPDATE surveys SET remind_minutes=NULL WHERE id=?", (rid,))
+    sv = dbx.execute("SELECT * FROM surveys WHERE id=?", (rid,)).fetchone()
+    ok(services.effective_remind_minutes(dbx, sv) == (), "어디에도 없으면 리마인더 없음 (기본)")
     with dbx:
         dbx.execute("UPDATE groups SET remind_minutes='20' WHERE id=?", (hq,))  # 상위(본부)에만 설정
-    ok(services.effective_remind_minutes(dbx, sv) == (20,), "그룹 설정 없으면 상위 그룹(본부) 설정 상속")
+    ok(services.effective_remind_minutes(dbx, sv) == (20,), "조사·팀에 없으면 상위 그룹(본부) 설정 상속")
     with dbx:
         dbx.execute("UPDATE surveys SET remind_minutes='0' WHERE id=?", (rid,))
     sv = dbx.execute("SELECT * FROM surveys WHERE id=?", (rid,)).fetchone()
