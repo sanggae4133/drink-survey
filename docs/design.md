@@ -48,7 +48,9 @@ DDL은 `app/schema.sql` 하나가 원본이다. 여기서는 제약이 담당하
 | `groups.name UNIQUE` | 그룹 이름 충돌 방지 |
 | `groups.parent_group_id → groups(id)` (CASCADE 없음) | 하위 그룹이 있는 그룹은 삭제 불가 |
 | `surveys.group_id` FK (CASCADE 없음) | 조사(기록)가 남은 그룹은 삭제 불가. 조사를 먼저 지워야 한다 |
-| `survey_schedules.group_id` ON DELETE CASCADE | 그룹을 지우면 그 그룹의 반복 규칙도 함께 |
+| `survey_schedules.group_id`, `.cafe_id` ON DELETE CASCADE | 그룹이나 카페를 지우면 그 반복 규칙도 함께 |
+| `menus.cafe_id` ON DELETE CASCADE, `survey_responses.menu_id` FK (CASCADE 없음) | 카페를 지우면 메뉴도. 단 응답이 참조하는 메뉴가 있으면 카페 삭제 자체가 막힌다 |
+| `surveys.cafe_id` FK (CASCADE 없음) | 조사(기록)가 있는 카페는 삭제 불가 |
 | `surveys.schedule_id` ON DELETE SET NULL | 스케줄을 지워도 이미 만들어진 조사는 남는다 |
 | `survey_responses.survey_id` ON DELETE CASCADE | 조사를 지우면 응답도 함께 |
 | `group_members` ON DELETE CASCADE | 회원·그룹 삭제 시 소속 자동 정리 |
@@ -162,6 +164,7 @@ tick(1분) 또는 홈 접속 ──▶ 오늘 요일과 일치하는 enabled 스
 
 누구나 등록·수정. 대신 `menus.updated_by/updated_at`을 남겨 화면에 "최근 수정: 누가 언제"를 보여준다.
 삭제는 응답·즐겨찾기·카페 기본음료 어디서도 참조하지 않는 메뉴만 가능(FK가 막고, 막히면 안내). 쓰인 메뉴는 `is_active=0`(판매 중지).
+카페 삭제는 **관리자만**. 메뉴·스케줄·즐겨찾기는 함께 지워지고, 그 카페로 진행한 조사가 하나라도 있으면 거절(기록 보호).
 카페 공통 기본음료는 그 카페의 `is_active` 메뉴만 지정 가능.
 
 ## 메뉴 옵션 JSON (저장 형식)

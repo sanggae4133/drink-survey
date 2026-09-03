@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS cafes (
 
 CREATE TABLE IF NOT EXISTS menus (
   id          INTEGER PRIMARY KEY,
-  cafe_id     INTEGER NOT NULL REFERENCES cafes(id),
+  cafe_id     INTEGER NOT NULL REFERENCES cafes(id) ON DELETE CASCADE,  -- 카페 삭제 시 메뉴도. 응답이 참조하는 메뉴가 있으면 그 FK가 막는다
   name        TEXT NOT NULL,
   base_price  INTEGER NOT NULL,
   options     TEXT NOT NULL DEFAULT '[]',  -- JSON: [{name, required, choices:[{label, delta_price}]}]
@@ -60,8 +60,8 @@ CREATE TABLE IF NOT EXISTS user_cafe_defaults (
 
 CREATE TABLE IF NOT EXISTS survey_schedules (
   id            INTEGER PRIMARY KEY,
-  group_id      INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,  -- 그룹 삭제 시 규칙도 함께
-  cafe_id       INTEGER NOT NULL REFERENCES cafes(id),
+  group_id      INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,  -- 그룹/카페 삭제 시 규칙도 함께
+  cafe_id       INTEGER NOT NULL REFERENCES cafes(id) ON DELETE CASCADE,
   weekday       INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),  -- 0=월 … 6=일
   deadline_time TEXT NOT NULL,                                     -- 'HH:MM' (조사 당일 마감 시각)
   allow_guests  INTEGER NOT NULL DEFAULT 0,

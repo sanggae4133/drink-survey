@@ -107,6 +107,22 @@ def cafe_update(cid: int, request: Request, name: str = Form(...), menu_url: str
     return RedirectResponse(f"/cafes/{cid}", status_code=303)
 
 
+@router.post("/cafes/{cid}/delete")
+def cafe_delete(cid: int, request: Request, user: sqlite3.Row = Depends(require_admin),
+                db: sqlite3.Connection = Depends(db_dep)):
+    """관리자만. 메뉴·스케줄·즐겨찾기는 CASCADE, 조사(기록)가 하나라도 있으면 FK가 막는다."""
+    try:
+        with db:
+            cur = db.execute("DELETE FROM cafes WHERE id=?", (cid,))
+        if not cur.rowcount:
+            raise HTTPException(404)
+        flash(request, "카페를 삭제했습니다 (메뉴·스케줄·즐겨찾기 포함)")
+        return RedirectResponse("/cafes", status_code=303)
+    except sqlite3.IntegrityError:
+        flash(request, "이 카페로 진행한 조사(기록)가 있어 삭제할 수 없습니다. 조사를 먼저 삭제하거나, 카페 정보만 고쳐 쓰세요")
+        return RedirectResponse(f"/cafes/{cid}", status_code=303)
+
+
 @router.post("/cafes/{cid}/menus")
 async def menu_create(cid: int, request: Request, name: str = Form(...),
                       base_price: int = Form(..., ge=0, le=10_000_000),

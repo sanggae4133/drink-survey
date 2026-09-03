@@ -304,6 +304,11 @@ with TestClient(app):
     ok(q1("SELECT COUNT(*) n FROM surveys WHERE id=?", sid)["n"] == 0
        and q1("SELECT COUNT(*) n FROM survey_responses WHERE survey_id=?", sid)["n"] == 0,
        "생성자가 조사 삭제 → 응답도 함께 삭제")
+    m2.post("/surveys", data={"survey_date": today, "deadline_time": deadline, "group_id": str(hq),
+                              "cafe_id": str(cafe), "title": "m2가 만든 조사"})
+    s2 = q1("SELECT id FROM surveys WHERE title='m2가 만든 조사'")["id"]
+    admin.post(f"/surveys/{s2}/delete")
+    ok(q1("SELECT COUNT(*) n FROM surveys WHERE id=?", s2)["n"] == 0, "관리자는 남이 만든 조사도 삭제")
     sched = q1("SELECT id FROM survey_schedules WHERE title_pattern LIKE '{M/D}%'")["id"]
     m1.post(f"/schedules/{sched}/delete")
     ok(q1("SELECT COUNT(*) n FROM survey_schedules WHERE id=?", sched)["n"] == 0
@@ -316,5 +321,18 @@ with TestClient(app):
        "그룹 삭제 → 스케줄 CASCADE, 조사 없는 그룹은 삭제됨")
     admin.post(f"/admin/groups/{team}/delete")  # 조사(자동 생성된 주간회의)가 남아 있음
     ok(q1("SELECT COUNT(*) n FROM groups WHERE id=?", team)["n"] == 1, "조사(기록)가 남은 그룹은 삭제 거절")
+    r = m1.post(f"/cafes/{cafe}/delete")
+    admin.post(f"/cafes/{cafe}/delete")  # 주간회의 조사가 이 카페를 참조
+    ok(r.status_code == 403 and q1("SELECT COUNT(*) n FROM cafes WHERE id=?", cafe)["n"] == 1,
+       "카페 삭제: 관리자만(403), 조사(기록)가 있으면 거절")
+    admin.post("/cafes", data={"name": "임시카페", "menu_url": ""})
+    tmp = q1("SELECT id FROM cafes WHERE name='임시카페'")["id"]
+    admin.post(f"/cafes/{tmp}/menus", data={"name": "물", "base_price": 0})
+    admin.post("/schedules", data={"group_id": str(hq), "cafe_id": str(tmp), "weekday": "0", "deadline_time": "10:00"})
+    admin.post(f"/cafes/{tmp}/delete")
+    ok(q1("SELECT COUNT(*) n FROM cafes WHERE id=?", tmp)["n"] == 0
+       and q1("SELECT COUNT(*) n FROM menus WHERE cafe_id=?", tmp)["n"] == 0
+       and q1("SELECT COUNT(*) n FROM survey_schedules WHERE cafe_id=?", tmp)["n"] == 0,
+       "카페 삭제 → 메뉴·스케줄 CASCADE")
 
     print(f"\nPASS {PASS} checks")

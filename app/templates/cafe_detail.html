@@ -48,6 +48,12 @@
     <button>저장</button>
   </form>
   <p class="muted">기본음료: 즐겨찾기가 없는 미응답자에게 마감 때 자동 채택되는 메뉴.</p>
+  {% if user['role'] == 'admin' %}
+  <form class="inline" method="post" action="/cafes/{{ cafe['id'] }}/delete"
+        onsubmit="return confirm('카페를 삭제할까요? 메뉴·반복 스케줄·즐겨찾기가 함께 삭제됩니다. 이 카페로 진행한 조사가 있으면 삭제되지 않습니다.')">
+    <button class="ghost muted">카페 삭제 (관리자)</button>
+  </form>
+  {% endif %}
 </div>
 
 <h2>메뉴</h2>

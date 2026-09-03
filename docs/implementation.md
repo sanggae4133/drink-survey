@@ -72,6 +72,7 @@ run.sh             .env 로드 후 uvicorn
 | GET `/surveys/{id}/summary` | 로그인 | lazy 마감 → `build_summary`. open이면 "진행 중" 배지 | |
 | GET/POST `/cafes` | 로그인 | 목록 / 등록. `menu_url`은 http(s)만 | `/cafes/{id}` |
 | GET/POST `/cafes/{id}` | 로그인 | 상세·메뉴 목록 / 이름·링크·기본음료 수정 | |
+| POST `/cafes/{id}/delete` | admin | DELETE (메뉴·스케줄·즐겨찾기 CASCADE). 조사 FK 위반이면 flash | `/cafes` |
 | POST `/cafes/{id}/menus` | 로그인 | 옵션 UI 필드 → JSON 조립·검증 후 INSERT | `/cafes/{id}` |
 | POST `/menus/{id}` | 로그인 | 같은 조립·검증 후 UPDATE + updated_by/at | `/cafes/{cafe}` |
 | POST `/menus/{id}/delete` | 로그인 | DELETE. FK 위반(응답·즐겨찾기·기본음료)이면 flash | `/cafes/{cafe}` |
@@ -140,7 +141,7 @@ run.sh             .env 로드 후 uvicorn
 DEV_LOGIN=1 python smoke_test.py
 ```
 
-- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 56 체크, 약 1초.
+- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 59 체크, 약 1초.
 - 단위 테스트 프레임워크 없음. `ok(cond, msg)` 하나. 실패하면 첫 실패에서 `AssertionError`로 멈춘다.
 - 시간 의존 테스트(마감, 스케줄)는 DB의 `deadline_at`을 직접 과거로 UPDATE해서 트리거한다.
 - 구글 OAuth 콜백은 테스트 안 함. dev 로그인이 같은 `invited→active` 경로를 탄다.
