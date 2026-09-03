@@ -1,15 +1,19 @@
-"""도메인 로직: 그룹 트리, lazy 마감·자동 채택, lazy 스케줄 생성, 집계.
+"""도메인 로직: 그룹 트리, 마감·자동 채택, 스케줄 생성, 집계, 텔레그램 알림.
 
-설계 원칙(설계서 참고):
-- 스케줄러/크론 없음. 마감도 자동 생성도 '접근 시점(lazy)'에 처리하고, 멱등성은
-  SQL 제약(UNIQUE 인덱스, status CAS UPDATE)이 보장한다.
+시간 기반 동작(마감, 주간 조사 생성)은 main.py의 1분 주기 tick()과 사용자 접근(lazy) 양쪽에서 실행되며,
+멱등성은 SQL 제약(UNIQUE 인덱스, status CAS UPDATE)이 보장하므로 몇 번 겹쳐 돌아도 안전하다.
 """
 import json
+import logging
 import sqlite3
 from datetime import datetime
 
-from . import models
-from .db import now_min, now_str
+import httpx
+
+from . import config, models
+from .db import get_conn, now_min, now_str
+
+log = logging.getLogger(__name__)
 
 
 KR_WEEKDAYS = "월화수목금토일"
@@ -136,6 +140,8 @@ def close_survey(db: sqlite3.Connection, survey_id: int, due_only: bool = True) 
         )
         if cur.rowcount:
             _autofill(db, survey_id)
+    if cur.rowcount:
+        announce(db, survey_id, closed=True)
 
 
 def _autofill(db: sqlite3.Connection, survey_id: int) -> None:
@@ -209,13 +215,77 @@ def generate_due_surveys(db: sqlite3.Connection) -> None:
             md = f"{today.month}/{today.day}({KR_WEEKDAYS[weekday]})"  # 9/4(월)
             title = s["title_pattern"].replace("{M/D}", md)
         with db:
-            db.execute(
+            cur = db.execute(
                 "INSERT OR IGNORE INTO surveys "
                 "(title, survey_date, group_id, cafe_id, deadline_at, allow_guests, schedule_id, created_by) "
                 "VALUES (?,?,?,?,?,?,?,?)",
                 (title, today_s, s["group_id"], s["cafe_id"], deadline,
                  s["allow_guests"], s["id"], s["created_by"]),
             )
+        if cur.rowcount:
+            announce(db, cur.lastrowid, closed=False)
+
+
+def tick() -> None:
+    """1분마다(main.py) 도는 스케줄러 본체: 오늘 스케줄 조사 생성 + 마감 지난 조사 닫기.
+
+    라우터의 lazy 처리와 같은 함수를 쓰므로 스케줄러가 죽어도 사람 접근으로 동작은 이어진다.
+    """
+    db = get_conn()
+    try:
+        generate_due_surveys(db)
+        due = db.execute(
+            "SELECT id FROM surveys WHERE status='open' AND deadline_at <= ?", (now_min(),)
+        ).fetchall()
+        for r in due:
+            close_survey(db, r["id"])
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------- 텔레그램 알림
+
+def notify_targets(db: sqlite3.Connection, group_id: int) -> list[str]:
+    """알림 받을 chat_id 목록.
+
+    ① 그 그룹 → 가장 가까운 상위 순으로 올라가며 chat_id가 있는 첫 그룹 하나.
+    ② 위에 아무도 없으면 하위로 내려가며, 각 가지에서 chat_id가 있는 첫 그룹(들).
+    → 같은 사람이 두 채팅에서 중복으로 받지 않는다.
+    """
+    g = db.execute("SELECT * FROM groups WHERE id=?", (group_id,)).fetchone()
+    while g is not None:
+        if g["telegram_chat_id"]:
+            return [g["telegram_chat_id"]]
+        g = (db.execute("SELECT * FROM groups WHERE id=?", (g["parent_group_id"],)).fetchone()
+             if g["parent_group_id"] else None)
+    out: list[str] = []
+
+    def down(gid):
+        for c in db.execute("SELECT * FROM groups WHERE parent_group_id=?", (gid,)):
+            if c["telegram_chat_id"]:
+                out.append(c["telegram_chat_id"])
+            else:
+                down(c["id"])
+
+    down(group_id)
+    return out
+
+
+def announce(db: sqlite3.Connection, survey_id: int, closed: bool) -> None:
+    """조사 생성/마감을 그룹 텔레그램에 알린다. 토큰이 없거나 실패해도 본 동작은 영향 없음."""
+    if not config.TELEGRAM_BOT_TOKEN:
+        return
+    s = build_summary(db, survey_id)
+    sv = s["survey"]
+    link = f"{config.APP_URL}/surveys/{survey_id}{'/summary' if closed else ''}" if config.APP_URL else ""
+    text = (f"✅ 마감\n{s['copy_text']}" if closed
+            else f"☕ 새 조사 · {survey_title(sv)}\n{sv['cafe_name']} · 마감 {sv['deadline_at']}")
+    for chat_id in notify_targets(db, sv["group_id"]):
+        try:  # ponytail: 동기 전송(요청당 최대 5초). 느려지면 asyncio.to_thread/큐로
+            httpx.post(f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage",
+                       json={"chat_id": chat_id, "text": f"{text}\n{link}".strip()}, timeout=5)
+        except httpx.HTTPError as e:
+            log.warning("telegram 전송 실패 chat=%s: %s", chat_id, e)
 
 
 # ---------------------------------------------------------------- 집계(주문서)

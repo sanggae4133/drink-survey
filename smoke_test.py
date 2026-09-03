@@ -11,8 +11,9 @@ from datetime import datetime, timedelta
 os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "smoke.db")
 os.environ["DEV_LOGIN"] = "1"
 os.environ["SESSION_SECRET"] = "smoke-test"
-os.environ.pop("GOOGLE_CLIENT_ID", None)
-os.environ.pop("GOOGLE_CLIENT_SECRET", None)
+os.environ["GOOGLE_CLIENT_ID"] = ""   # .env 값이 들어오지 않게 빈 값으로 고정 (pop이면 config가 .env에서 채움)
+os.environ["GOOGLE_CLIENT_SECRET"] = ""
+os.environ["TELEGRAM_BOT_TOKEN"] = ""
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -220,7 +221,28 @@ with TestClient(app):
     ok(created[0]["title"] == f"{now.month}/{now.day}({'월화수목금토일'[now.weekday()]}) 주간회의",
        "제목 패턴 {M/D} → 월/일(요일) 치환")
 
-    print("== 7. 접근 회수·하드닝 ==")
+    print("== 7. 스케줄러 tick + 텔레그램 대상 선택 ==")
+    dbw = get_conn()
+    with dbw:
+        dbw.execute("UPDATE surveys SET deadline_at=? WHERE id=?",
+                    ((datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M"), created[0]["id"]))
+    dbw.close()
+    services.tick()  # 사람 접근 없이 스케줄러만으로 마감
+    ok(q1("SELECT status s FROM surveys WHERE id=?", created[0]["id"])["s"] == "closed", "tick()이 마감 처리")
+    dbx = get_conn()
+    with dbx:
+        dbx.execute("UPDATE groups SET telegram_chat_id='hq-chat' WHERE id=?", (hq,))
+    ok(services.notify_targets(dbx, team) == ["hq-chat"], "팀에 chat_id 없으면 가장 가까운 상위(본부)로")
+    with dbx:
+        dbx.execute("UPDATE groups SET telegram_chat_id=NULL WHERE id=?", (hq,))
+        dbx.execute("UPDATE groups SET telegram_chat_id='team-chat' WHERE id=?", (team,))
+    ok(services.notify_targets(dbx, hq) == ["team-chat"], "상위에 없으면 하위로 내려가며 있는 그룹들로")
+    with dbx:
+        dbx.execute("UPDATE groups SET telegram_chat_id=NULL")
+    ok(services.notify_targets(dbx, hq) == [], "아무 데도 없으면 안 보냄")
+    dbx.close()
+
+    print("== 8. 접근 회수·하드닝 ==")
     m3 = client_for("m3@t.co")
     admin.post(f"/admin/users/{uid['m3@t.co']}/toggle")
     ok(m3.get("/", follow_redirects=False).status_code == 303, "비활성화된 계정은 기존 세션도 즉시 거절")

@@ -1,8 +1,17 @@
-"""환경 설정 — 전부 환경변수로 주입한다 (.env.example 참고)."""
+"""환경 설정 — 환경변수 우선, 없으면 프로젝트 루트의 .env (.env.example 참고)."""
 import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# .env를 앱이 직접 읽는다. run.sh/systemd 없이 uvicorn을 바로 띄워도 같은 설정이 들어가게.
+# 이미 있는 환경변수(systemd EnvironmentFile, 테스트가 넣은 값)가 우선 — setdefault.
+_env = BASE_DIR / ".env"
+if _env.exists():
+    for _line in _env.read_text(encoding="utf-8").splitlines():
+        if _line.strip() and not _line.lstrip().startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
 DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "drink_survey.db"))
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "dev-secret-change-me")
@@ -19,6 +28,11 @@ ALLOWED_DOMAIN = os.environ.get("ALLOWED_DOMAIN", "")
 DEV_LOGIN = os.environ.get("DEV_LOGIN", "0") == "1"
 
 OAUTH_CONFIGURED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+
+# 텔레그램 알림 (선택). 봇 토큰이 없으면 알림 기능 전체가 꺼진다. chat_id는 그룹 관리에서 그룹별로.
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+# 알림 메시지에 붙일 링크의 기준 URL (예: https://drink.tailxxxx.ts.net). 비우면 링크 없이 보냄.
+APP_URL = os.environ.get("APP_URL", "").rstrip("/")
 
 # 운영(DEV_LOGIN=0) 기동 가드. 기본 시크릿이면 누구나 admin 세션 쿠키를 서명해 만들 수 있다.
 if not DEV_LOGIN:

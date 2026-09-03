@@ -6,7 +6,7 @@
   <form method="post" action="/surveys">
     <div class="row" style="margin-bottom:10px">
       <label>일자 <input type="date" name="survey_date" value="{{ today }}" required></label>
-      <label>마감 <input type="time" name="deadline_time" value="10:30" required></label>
+      <label>마감 <input type="time" name="deadline_time" value="{{ default_time }}" required></label>
     </div>
     <div class="row" style="margin-bottom:10px">
       <label>그룹

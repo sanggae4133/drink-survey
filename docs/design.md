@@ -93,11 +93,11 @@ DDL은 `app/schema.sql` 하나가 원본이다. 여기서는 제약이 담당하
 - 홈에 보이는 조사 = 내가 직속 소속인 그룹 **및 그 조상 그룹**의 조사. 본부 조사도 내 대상이기 때문.
 - 순환 금지: 그룹의 상위를 바꿀 때 새 상위가 자기 자신이나 자기 자손이면 거절.
 
-### R3. 마감은 lazy, 자동 채택은 마감과 한 트랜잭션
+### R3. 마감은 스케줄러(1분)와 접근 양쪽에서, 자동 채택은 마감과 한 트랜잭션
 
 ```
-접근 ──▶ UPDATE surveys SET status='closed' WHERE id=? AND status='open' AND deadline_at <= now
-       ├─ rowcount=1 (내가 닫았다) ──▶ 자동 채택 실행
+tick 또는 접근 ──▶ UPDATE surveys SET status='closed' WHERE id=? AND status='open' AND deadline_at <= now
+       ├─ rowcount=1 (내가 닫았다) ──▶ 자동 채택 실행 → 텔레그램 알림
        └─ rowcount=0 (이미 닫혔거나 아직) ──▶ 아무것도 안 함
 ```
 
@@ -111,15 +111,16 @@ DDL은 `app/schema.sql` 하나가 원본이다. 여기서는 제약이 담당하
 
 수동 마감(생성자·관리자)은 같은 함수에 `deadline_at` 조건만 뺀 것이다.
 
-### R4. 스케줄은 lazy 생성, 놓친 주는 건너뜀
+### R4. 스케줄 조사는 요일 0시 직후 tick이 생성, 마감이 지났으면 건너뜀
 
 ```
-홈 접속 ──▶ 오늘 요일과 일치하는 enabled 스케줄마다
+tick(1분) 또는 홈 접속 ──▶ 오늘 요일과 일치하는 enabled 스케줄마다
           ├─ 오늘 마감시각이 이미 지났다 ──▶ 건너뜀 (stale skip)
-          └─ 아니면 INSERT OR IGNORE surveys (schedule_id, survey_date=오늘)
+          └─ 아니면 INSERT OR IGNORE surveys (schedule_id, survey_date=오늘) → 생성됐으면 텔레그램 알림
 ```
 
-- stale skip 이유: 마감이 지난 뒤 첫 접속이 조사를 만들면, 그 즉시 닫히고 전원 자동 채택된 "유령 주문서"가 생긴다.
+- 정상 운영에서는 0시 직후 tick이 만든다. 아무도 응답하지 않아도 마감 때 자동 채택된 주문서가 나온다 — 그게 의도다.
+- stale skip은 앱이 하루 내내 꺼져 있다가 마감 후 켜진 경우의 방어. 그때 조사를 만들면 즉시 닫히고 전원 자동 채택된 "유령 주문서"가 생긴다.
 - `title_pattern`의 `{M/D}`는 `9/4(월)` 같은 오늘 날짜(요일)로 치환. 비우면 제목 NULL → 화면에서 `2026-09-07(월) 시스템1팀`처럼 표시(`services.survey_title`).
 - 스케줄은 삭제하지 않고 `enabled` 토글만 한다. 과거 조사가 `schedule_id`로 참조하기 때문.
 
@@ -135,6 +136,13 @@ DDL은 `app/schema.sql` 하나가 원본이다. 여기서는 제약이 담당하
 `survey_responses.final_price` = 응답 시점의 `base_price + Σ delta_price`. `selected_options`도 라벨·delta_price를 통째로 저장.
 이후 메뉴 가격이나 옵션이 바뀌어도 과거 주문서 금액은 변하지 않는다.
 즐겨찾기(`user_cafe_defaults.selected_options`)도 스냅샷이지만, 자동 채택 시 가격은 **그 시점 메뉴 기준으로 재계산**한다.
+
+### R8. 텔레그램 알림은 "가장 가까운 한 채팅"
+
+- 그룹마다 `telegram_chat_id`(선택). 조사 생성·마감 때 `notify_targets(group)`이 정한 채팅으로 보낸다.
+- 우선순위: 그 그룹 → 가장 가까운 상위 그룹 … 중 chat_id가 있는 **첫 하나**. 위에 하나도 없으면 하위로 내려가며 각 가지의 첫 그룹들.
+- 이유: 본부 채팅에 팀원이 모두 있으면 팀 채팅에 또 보내는 건 중복이다. 반대로 본부 채팅이 없으면 팀 채팅 각각에 보내야 모두가 받는다.
+- 봇 토큰(`TELEGRAM_BOT_TOKEN`)이 없으면 기능 전체가 꺼진다. 전송 실패는 로그만 남기고 본 동작(마감·생성)은 그대로.
 
 ### R7. 카페·메뉴는 위키 모델
 
@@ -188,7 +196,8 @@ DDL은 `app/schema.sql` 하나가 원본이다. 여기서는 제약이 담당하
 
 | 대안 | 채택 안 한 이유 |
 |---|---|
-| APScheduler/크론으로 마감·생성 | 프로세스 하나 더, 재시작·중복 실행 고려 필요. lazy로 요구가 전부 충족됨 |
+| 크론 + 공개 `/tick` 엔드포인트 | 비로그인 공개 경로가 하나 늘고 crontab 설정이 배포 절차에 추가됨. 인프로세스 asyncio 루프가 둘 다 피함 |
+| APScheduler | `asyncio.sleep(60)` 루프로 충분. 의존성 하나 아낌 |
 | 옵션 테이블 정규화 | 옵션으로 조회·집계하지 않음. JSON 컬럼 + pydantic 검증이 더 짧다 |
 | 사용자 자기 가입 + 승인 | 사전 등록이 곧 승인. 화면·상태 하나씩 줄어듦 |
 | 게스트 잔 옵션 선택 UI | 요구 없음. 필요해지면 `respond`의 `_parse_selection`을 재사용하면 됨 |
@@ -196,4 +205,4 @@ DDL은 `app/schema.sql` 하나가 원본이다. 여기서는 제약이 담당하
 
 ## v2 후보 (README와 동일)
 
-결제자 뽑기 · 정산 기록 · 마감 전 리마인더(이건 스케줄러가 필요함) · 복수 카페 후보 투표 · HTMX 부분 갱신
+결제자 뽑기 · 정산 기록 · 마감 전 리마인더(tick에 조건 하나 추가하면 됨) · 복수 카페 후보 투표 · HTMX 부분 갱신

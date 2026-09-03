@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from .. import models, services
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..db import db_dep, now_min, now_str
 from ..deps import current_user, flash, render
@@ -61,8 +61,9 @@ def new_survey(request: Request, user: sqlite3.Row = Depends(current_user),
     cafes = db.execute(
         "SELECT c.*, (SELECT COUNT(*) FROM menus m WHERE m.cafe_id=c.id AND m.is_active=1) AS menu_count "
         "FROM cafes c WHERE c.is_active=1 ORDER BY c.name").fetchall()
-    return render(request, "survey_new.html", user=user, groups=groups, cafes=cafes,
-                  src=src, today=now_min()[:10])
+    default = datetime.now() + timedelta(hours=1)  # 마감 기본값: 지금부터 1시간 뒤 (자정 넘으면 날짜도 내일)
+    return render(request, "survey_new.html", user=user, groups=groups, cafes=cafes, src=src,
+                  today=default.strftime("%Y-%m-%d"), default_time=default.strftime("%H:%M"))
 
 
 @router.post("")
@@ -97,6 +98,7 @@ def create_survey(request: Request,
             (title.strip() or None, survey_date, group_id, cafe_id, deadline_at,
              1 if allow_guests else 0, user["id"]))
         sid = cur.lastrowid
+    services.announce(db, sid, closed=False)
     return RedirectResponse(f"/surveys/{sid}", status_code=303)
 
 

@@ -7,7 +7,7 @@
 
 ```
 app/
-  main.py          앱 조립. SessionMiddleware, 본문 64KB 상한·보안 헤더 미들웨어, 라우터 7개, import 시점에 init_db()
+  main.py          앱 조립. lifespan(init_db + 1분 주기 tick 태스크), SessionMiddleware, 본문 64KB 상한·보안 헤더, 라우터 7개
   config.py        환경변수 → 상수. OAUTH_CONFIGURED = client id/secret 둘 다 있을 때
   db.py            get_conn() / init_db() / db_dep() / now_str() / now_min()
   schema.sql       DDL 원본. CREATE ... IF NOT EXISTS 라 매 기동마다 실행해도 안전
@@ -39,9 +39,12 @@ run.sh             .env 로드 후 uvicorn
 | `group_tree(db)` | `[{row, depth}]` 트리 순서 평탄화 | 그룹 관리 화면 |
 | `compute_price(menu, sel)` | `base_price + Σ delta_price` | 응답, 게스트, 자동 채택 |
 | `default_selection(menu)` | 필수 옵션 그룹마다 첫 선택지 | 게스트 잔, 카페 기본음료 자동 채택 |
-| `close_survey(db, sid, due_only=True)` | CAS로 closed 전환, 성공 시 `_autofill`. `due_only=False`면 수동 즉시 마감 | 홈·상세·응답·게스트·주문서 진입, 수동 마감 |
+| `close_survey(db, sid, due_only=True)` | CAS로 closed 전환, 성공 시 `_autofill` + `announce`. `due_only=False`면 수동 즉시 마감 | tick, 홈·상세·응답·게스트·주문서 진입, 수동 마감 |
 | `_autofill(db, sid)` | 미응답 active 멤버에 즐겨찾기 → 기본음료 → 제외 순으로 `is_auto=1` 응답 INSERT | `close_survey` 안에서만 |
-| `generate_due_surveys(db)` | 오늘 요일 스케줄 → stale skip → `INSERT OR IGNORE` | 홈 |
+| `generate_due_surveys(db)` | 오늘 요일 스케줄 → stale skip → `INSERT OR IGNORE` → 생성 시 `announce` | tick, 홈 |
+| `tick()` | 커넥션 열고 `generate_due_surveys` + 마감 지난 조사 전부 `close_survey` | main.py 스케줄러(60초) |
+| `notify_targets(db, gid)` | 알림 chat_id 목록: 자신→상위 중 첫 하나, 없으면 하위로 내려가며 | `announce` |
+| `announce(db, sid, closed)` | 생성/마감 텔레그램 메시지. 토큰 없으면 즉시 반환 | `close_survey`, `generate_due_surveys`, `create_survey` |
 | `build_summary(db, sid)` | 주문서 dict (combos, persons, guests, 합계, excluded, copy_text) | 상세 화면 현황, 주문서 화면 |
 | `survey_title(row)` | 제목 없으면 `날짜(요일) 그룹명`. Jinja 전역으로도 등록(deps.py) | 홈·상세·주문서 템플릿, copy_text |
 
@@ -76,7 +79,7 @@ run.sh             .env 로드 후 uvicorn
 | POST `/admin/users/{id}` | admin | 이름·역할 수정. invited가 아니면 이메일 변경 거절. 자기 admin 해제 거절 | |
 | POST `/admin/users/{id}/toggle` | admin | disabled ↔ active/invited. 자기 자신 불가 | |
 | GET/POST `/admin/groups` | admin | 트리 + 멤버 체크박스 / 그룹 생성 | |
-| POST `/admin/groups/{id}` | admin | 이름·상위 변경. `creates_cycle`이면 거절 | |
+| POST `/admin/groups/{id}` | admin | 이름·상위·텔레그램 chat_id 변경. `creates_cycle`이면 거절 | |
 | POST `/admin/groups/{id}/members` | admin | 직속 멤버 전체 교체 (DELETE 후 INSERT) | |
 | POST `/admin/groups/{id}/delete` | admin | DELETE. FK 위반(`IntegrityError`)이면 flash로 거절 | |
 
@@ -116,9 +119,13 @@ run.sh             .env 로드 후 uvicorn
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | 빈 값 | 둘 다 있어야 구글 로그인 버튼 활성 |
 | `ALLOWED_DOMAIN` | 빈 값 | 설정 시 이 도메인 이메일만 허용 + 구글 `hd` 힌트 |
 | `DEV_LOGIN` | `0` | `1`이면 dev 로그인 폼 노출 + `/docs` 활성 + 세션 쿠키 `Secure`·HSTS 해제. `0`이면 기본 시크릿·OAuth 미설정 시 기동 거부 |
+| `TELEGRAM_BOT_TOKEN` | 빈 값 | 있으면 조사 생성·마감 알림 활성 |
+| `APP_URL` | 빈 값 | 알림 메시지 링크의 기준 URL (Funnel 주소) |
 | `PORT` | `8080` | run.sh만 사용 |
 
-`config.py`는 import 시점에 환경변수를 읽는다. 테스트가 `os.environ`을 먼저 세팅한 뒤 `app.main`을 import하는 이유.
+`config.py`는 import 시점에 프로젝트 루트 `.env`를 읽어 **없는 키만** `os.environ`에 넣고(setdefault), 그다음 환경변수를 읽는다.
+그래서 systemd `EnvironmentFile`·셸 환경변수가 `.env`보다 우선하고, 테스트는 `os.environ`을 먼저 세팅한 뒤 `app.main`을 import한다.
+테스트에서 어떤 키를 "없는 상태"로 두려면 `pop`이 아니라 빈 문자열로 세팅해야 `.env` 값이 스며들지 않는다.
 
 ## 테스트
 
@@ -126,7 +133,7 @@ run.sh             .env 로드 후 uvicorn
 DEV_LOGIN=1 python smoke_test.py
 ```
 
-- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 40 체크, 약 1초.
+- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 44 체크, 약 1초.
 - 단위 테스트 프레임워크 없음. `ok(cond, msg)` 하나. 실패하면 첫 실패에서 `AssertionError`로 멈춘다.
 - 시간 의존 테스트(마감, 스케줄)는 DB의 `deadline_at`을 직접 과거로 UPDATE해서 트리거한다.
 - 구글 OAuth 콜백은 테스트 안 함. dev 로그인이 같은 `invited→active` 경로를 탄다.
@@ -144,7 +151,8 @@ DEV_LOGIN=1 python smoke_test.py
 | 게스트 잔에 옵션 선택 추가 | `survey_detail.html` 게스트 폼에 라디오 추가 + `add_guest`에서 `default_selection` 대신 `_parse_selection` 사용 |
 | 옵션 편집기에 항목 추가(예: 선택지 설명) | `cafe_detail.html`의 `opt_row` 매크로 + `cafes._options_from_form` + `models.OptionChoice` 세 곳 |
 | 새 권한 규칙 | 라우터 핸들러 상단. `_can_manage` 패턴 참고 |
-| 스케줄러 도입(리마인더 등) | `close_survey`/`generate_due_surveys`는 이미 순수 함수라 그대로 호출 가능. 트리거만 추가 |
+| 마감 전 리마인더 | `services.tick`에 "마감 N분 전, 미응답자 있음" 조건 + `announce` 변형 하나 |
+| 알림 채널 추가(슬랙 등) | `services.announce`의 전송 부분만. 대상 선택(`notify_targets`)은 그대로 |
 | 시간대 지원 | 전 컬럼이 로컬 문자열이라 큰 변경. 그 전에 정말 필요한지부터 |
 
 ## 알려진 한계
@@ -152,4 +160,5 @@ DEV_LOGIN=1 python smoke_test.py
 - `is_effective_member`는 멤버 전체를 가져와 검사한다. 그룹이 수백 명이 되면 `WHERE u.id=?` 쿼리로 바꿀 것.
 - 동시에 두 요청이 같은 사람의 첫 응답을 넣으면 한쪽이 UNIQUE 위반으로 500. `INSERT ... ON CONFLICT DO UPDATE`로 바꾸면 해결.
 - 스키마 마이그레이션 도구 없음. 첫 `ALTER`가 필요해질 때 `migrations/` 디렉터리와 버전 테이블을 그때 만든다.
-- `main.py`가 import 시점에 `init_db()`를 호출한다. `DB_PATH`를 바꿔 테스트하려면 import 전에 환경변수를 세팅해야 한다.
+- 스케줄러는 uvicorn 워커 1개 전제. 워커를 늘리면 tick이 워커 수만큼 돌지만 SQL 제약 덕에 결과는 같고 알림만 중복될 수 있다.
+- 텔레그램 전송이 요청 안에서 동기로 일어난다(최대 5초 × 채팅 수). 느려지면 `asyncio.to_thread`나 큐로.

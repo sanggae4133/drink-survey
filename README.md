@@ -13,7 +13,7 @@ source .venv/bin/activate
 pip install -r requirements.txt        # 파이에선 --break-system-packages 필요할 수 있음
 cp .env.example .env                    # DEV_LOGIN=1 이 켜져 있음
 python seed.py --admin-email you@company.co.kr --admin-name 당신이름 --demo
-bash run.sh                             # http://127.0.0.1:8080
+bash run.sh                             # http://127.0.0.1:8080  (uvicorn app.main:app 으로 직접 띄워도 .env를 읽는다)
 ```
 
 개발 모드에서는 로그인 화면의 **dev 로그인**에 등록된 이메일을 넣으면 구글 없이 들어간다.
@@ -22,7 +22,7 @@ bash run.sh                             # http://127.0.0.1:8080
 ## 스모크 테스트
 
 ```bash
-python smoke_test.py        # 40개 체크: 로그인·트리·응답·게스트·lazy 마감·자동 채택·스케줄
+python smoke_test.py        # 44개 체크: 로그인·트리·응답·게스트·lazy 마감·자동 채택·스케줄
 ```
 
 ## 구조
@@ -50,10 +50,10 @@ seed.py              초기 관리자·데모 데이터
 - **회원**: 관리자가 이메일로 사전 등록 → 본인 최초 구글 로그인 때 `google_sub` 바인딩(active).
   미등록 이메일·다른 계정 바인딩 시도는 거절.
 - **그룹 트리**: `parent_group_id`로 본부-팀. 본부 조사의 대상은 유효 멤버(직속 ∪ 하위 팀, 중복 제거).
-- **lazy 마감**: 스케줄러 없음. 마감시각 지난 뒤 첫 접근이 마감 + 미응답자 자동 채택
-  (즐겨찾기 → 카페 공통 기본음료 → 제외). `active` 멤버만 대상.
-- **lazy 스케줄 생성**: 요일 당일 첫 접근이 그 주 조사 생성. 마감 지난 채 첫 접속이면 그 주 건너뜀.
-  멱등성은 `UNIQUE(schedule_id, survey_date)`가 보장.
+- **마감 + 자동 채택**: 앱 안의 1분 주기 스케줄러(`services.tick`)가 마감시각에 조사를 닫고 미응답자를 자동 채택
+  (즐겨찾기 → 카페 공통 기본음료 → 제외). `active` 멤버만 대상. 사용자 접근 시에도 같은 처리가 걸려(lazy) 스케줄러가 죽어도 동작.
+- **주간 조사 생성**: 스케줄 요일 0시 첫 tick이 그 주 조사를 만든다. 멱등성은 `UNIQUE(schedule_id, survey_date)`가 보장.
+- **텔레그램 알림**(선택): 조사 생성·마감 때 그룹 채팅으로. chat_id 없는 그룹은 가장 가까운 상위 → 없으면 하위 그룹으로.
 - **1인 1잔**: 재응답은 덮어쓰기. 게스트 잔은 `allow_guests`일 때 누구나 추가(추가자 표시).
 - **가격 스냅샷**: 응답 시점 가격을 `final_price`에 저장 → 이후 메뉴 가격이 바뀌어도 과거 조사 금액 보존.
 
@@ -105,6 +105,11 @@ sudo tailscale funnel --bg 8080
 
 > ⚠️ Funnel URL은 부서에만 공유해도 기술적으로는 공개 URL이다. 로그인(구글, 회사 도메인 한정)이
 > 그 앞을 막는 실질적 접근 제어다. 사내망에 상시 외부 터널을 두는 구성이니 보안 정책은 별도 확인 권장.
+
+### 4) 텔레그램 알림 (선택)
+1. 텔레그램 @BotFather → `/newbot` → 토큰을 `.env`의 `TELEGRAM_BOT_TOKEN`에.
+2. 봇을 부서 그룹 채팅에 초대. chat_id는 `https://api.telegram.org/bot<토큰>/getUpdates` 응답의 `chat.id`(그룹은 음수).
+3. 관리자 → 그룹 관리에서 해당 그룹에 chat_id 입력. `APP_URL`을 Funnel 주소로 넣으면 메시지에 링크가 붙는다.
 
 ### 백업
 SQLite 파일 하나이므로 백업은 `cp drink_survey.db 백업위치` (또는 `sqlite3 .backup`). cron으로 하루 1회 NAS에 복사 권장.

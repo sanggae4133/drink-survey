@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS groups (
   id              INTEGER PRIMARY KEY,
   name            TEXT NOT NULL UNIQUE,
   parent_group_id INTEGER REFERENCES groups(id),  -- 트리: NULL이면 최상위(본부)
+  telegram_chat_id TEXT,                          -- 알림 받을 텔레그램 채팅. NULL이면 상위→하위 순으로 대신 받을 그룹을 찾는다
   created_at      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 

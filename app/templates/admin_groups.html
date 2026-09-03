@@ -13,7 +13,9 @@
     </label>
     <button class="primary">만들기</button>
   </form>
-  <p class="muted">본부 그룹으로 조사를 열면 하위 팀 멤버 전체(중복 제거)가 응답 대상이 됩니다.</p>
+  <p class="muted">본부 그룹으로 조사를 열면 하위 팀 멤버 전체(중복 제거)가 응답 대상이 됩니다.<br>
+  <b>텔레그램 알림</b>: 봇을 그룹 채팅에 초대하고 그 채팅의 chat_id를 넣으면 조사 생성·마감 때 알림이 갑니다.
+  chat_id가 없는 그룹은 가장 가까운 상위 그룹의 채팅으로, 상위에도 없으면 하위 그룹 채팅들로 갑니다. (.env에 TELEGRAM_BOT_TOKEN 필요)</p>
 </div>
 
 {% for t in tree %}
@@ -30,6 +32,7 @@
         {% endfor %}
       </select>
     </label>
+    <input name="telegram_chat_id" value="{{ g['telegram_chat_id'] or '' }}" placeholder="텔레그램 chat_id (선택)" style="width:190px">
     <span class="badge">유효 멤버 {{ eff_count[g['id']] }}명</span>
     <button class="ghost">저장</button>
   </form>

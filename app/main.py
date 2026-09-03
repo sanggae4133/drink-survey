@@ -1,14 +1,40 @@
-"""앱 조립: 미들웨어, 라우터, 예외 핸들러, 스키마 초기화."""
+"""앱 조립: 미들웨어, 라우터, 스키마 초기화, 1분 주기 스케줄러."""
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import config
+from . import config, services
 from .db import init_db
 from .routers import admin, auth, cafes, home, me, schedules, surveys
 
+log = logging.getLogger(__name__)
+
+
+async def _ticker():
+    """기동 직후 1회, 이후 60초마다 services.tick(). 예외는 로그만 남기고 계속 돈다."""
+    while True:
+        try:
+            await asyncio.to_thread(services.tick)  # sqlite·텔레그램은 동기라 스레드로
+        except Exception:
+            log.exception("tick 실패")
+        await asyncio.sleep(60)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    init_db()
+    task = asyncio.create_task(_ticker())
+    yield
+    task.cancel()
+
+
 # 운영(DEV_LOGIN=0)에서는 /docs, /redoc, /openapi.json 전부 비활성 — 비로그인 공개 경로를 최소화
-app = FastAPI(title="음료조사", openapi_url="/openapi.json" if config.DEV_LOGIN else None)
+app = FastAPI(title="음료조사", lifespan=lifespan,
+              openapi_url="/openapi.json" if config.DEV_LOGIN else None)
 
 app.add_middleware(
     SessionMiddleware,
@@ -35,8 +61,6 @@ async def _harden(request: Request, call_next):
         resp.headers["Strict-Transport-Security"] = "max-age=31536000"
     return resp
 
-
-init_db()
 
 app.include_router(auth.router)
 app.include_router(home.router)
