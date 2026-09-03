@@ -4,7 +4,7 @@ import sqlite3
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from pydantic import ValidationError
 
 from .. import models
@@ -176,7 +176,8 @@ def cafe_export(cid: int, user: sqlite3.Row = Depends(current_user),
     body = {"cafe": cafe["name"], "menu_url": cafe["menu_url"],
             "menus": [{"name": m["name"], "base_price": m["base_price"], "is_active": bool(m["is_active"]),
                        "options": json.loads(m["options"])} for m in menus]}
-    return JSONResponse(body, headers={"Content-Disposition": f'attachment; filename="cafe-{cid}-menus.json"'})
+    return Response(json.dumps(body, ensure_ascii=False, indent=2), media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="cafe-{cid}-menus.json"'})
 
 
 @router.post("/cafes/{cid}/import")

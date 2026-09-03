@@ -68,25 +68,30 @@ GCP 콘솔 → API 및 서비스 → OAuth 클라이언트 ID(웹 애플리케�
 - 발급된 client id/secret을 `.env`에 넣고 `ALLOWED_DOMAIN=회사도메인`, `DEV_LOGIN=0` 으로.
 
 ### 2) systemd 유닛 (앱)
-`/etc/systemd/system/drink-survey.service`:
+`/etc/systemd/system/drink-survey.service` — `/home/pi/drink-survey`와 `pi`를 실제 경로·사용자로 바꿀 것.
+**uvicorn은 venv 안에 있으므로 절대경로로** (systemd는 PATH를 보지 않는다):
 ```ini
 [Unit]
 Description=Drink Survey
 After=network.target
 
 [Service]
-WorkingDirectory=/home/pi/drink-survey
-EnvironmentFile=/home/pi/drink-survey/.env
-ExecStart=/usr/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --limit-concurrency 32 --timeout-keep-alive 5 --no-server-header
-Restart=always
 User=pi
+WorkingDirectory=/home/pi/drink-survey
+ExecStart=/home/pi/drink-survey/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --limit-concurrency 32 --timeout-keep-alive 5 --no-server-header
+Restart=always
 
 [Install]
 WantedBy=multi-user.target
 ```
+`.env`는 앱이 직접 읽으므로 `EnvironmentFile`은 필요 없다(넣으면 그 값이 `.env`보다 우선).
 ```bash
-sudo systemctl enable --now drink-survey
+sudo systemctl daemon-reload && sudo systemctl enable --now drink-survey
+systemctl status drink-survey --no-pager -l     # 실패하면 journalctl -u drink-survey -n 30
 ```
+- `status=203/EXEC` + `Failed to locate executable` → `ExecStart` 경로가 틀림.
+- 경로가 맞는데도 `203/EXEC` → RHEL 등 SELinux enforcing. `sudo ausearch -m avc -ts recent`로 확인 후
+  `sudo chcon -R -t bin_t <프로젝트>/.venv/bin` 또는 프로젝트를 `/opt`로 이동.
 
 ### 3) Tailscale Funnel
 ```bash
