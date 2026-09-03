@@ -2,8 +2,8 @@
 {% block title %}스케줄 · 음료조사{% endblock %}
 {% block content %}
 <h1>반복 스케줄</h1>
-<p class="muted">스케줄 요일 당일, 누군가의 첫 접속이 그 주 조사를 자동 생성합니다.
-마감시각이 지나도록 아무도 접속하지 않은 주는 건너뜁니다.</p>
+<p class="muted">매주 정한 요일의 <b>생성 시각</b>에 조사가 자동으로 만들어지고(텔레그램 알림), <b>마감 시각</b>에 닫히며 미응답자는 자동 채택됩니다.
+마감 {{ remind_minutes }}분 전에 미응답자가 있으면 리마인더가 갑니다.</p>
 
 <div class="card">
   <form method="post" action="/schedules" class="row">
@@ -16,8 +16,10 @@
     <select name="weekday">
       {% for w in weekdays %}<option value="{{ loop.index0 }}">{{ w }}요일</option>{% endfor %}
     </select>
+    <label>생성 <input type="time" name="open_time" value="08:00" required></label>
     <label>마감 <input type="time" name="deadline_time" value="10:30" required></label>
     <input name="title_pattern" placeholder="제목 패턴 (선택)">
+    <input name="remind_minutes" placeholder="리마인더 분 (빈칸=그룹 설정)" style="width:170px" title="예: 30,10 / 0이면 끔">
     <label class="chk"><input type="checkbox" name="allow_guests" value="1"> 게스트 허용</label>
     <button class="primary">등록</button>
   </form>
@@ -25,17 +27,18 @@
     <b>제목 패턴</b>: 자동 생성되는 조사의 제목. <code>{M/D}</code>를 쓰면 생성일의 <b>월/일(요일)</b>로 바뀝니다.
     예: <code>{M/D} 주간회의</code> → <b>9/4(월) 주간회의</b>, <code>월요 티타임</code> → 매주 같은 제목.
     비우면 <b>날짜(요일) 그룹명</b>(예: 2026-09-07(월) 시스템1팀)으로 자동 표시됩니다.
-    <b>마감</b>은 조사 당일 기준 시각이며, 마감이 지난 뒤 첫 접속한 주는 조사가 생성되지 않습니다.
+    <b>생성</b>·<b>마감</b>은 조사 당일 기준 시각입니다. 서버가 꺼져 있다가 마감 후에 켜진 주는 조사를 만들지 않습니다.
+    <b>리마인더 분</b>은 이 스케줄로 만들어지는 조사에 그대로 들어갑니다. 빈칸이면 그룹 설정(없으면 기본값)을 따릅니다.
   </p>
 </div>
 
 <div class="tbl-scroll">
 {% if scheds %}
 <table>
-  <tr><th>요일·마감</th><th>그룹</th><th>카페</th><th>제목 패턴</th><th>상태</th><th>생성자</th><th></th></tr>
+  <tr><th>요일 · 생성 → 마감</th><th>그룹</th><th>카페</th><th>제목 패턴</th><th>상태</th><th>생성자</th><th></th></tr>
   {% for s in scheds %}
   <tr>
-    <td>{{ weekdays[s['weekday']] }} {{ s['deadline_time'] }}</td>
+    <td>매주 {{ weekdays[s['weekday']] }} {{ s['open_time'] }} → {{ s['deadline_time'] }}</td>
     <td>{{ s['group_name'] }}</td>
     <td>{{ s['cafe_name'] }}</td>
     <td>{{ s['title_pattern'] or '-' }}</td>

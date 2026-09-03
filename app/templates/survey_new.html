@@ -31,6 +31,10 @@
       <label class="chk"><input type="checkbox" name="allow_guests" value="1"
              {% if src and src['allow_guests'] %}checked{% endif %}> 게스트 잔 허용</label>
     </div>
+    <div class="row" style="margin-bottom:10px">
+      <label>리마인더 <input name="remind_minutes" value="{{ src['remind_minutes'] or '' if src else '' }}"
+             placeholder="빈칸=그룹 설정 (기본 {{ default_remind }})" style="width:220px" title="마감 몇 분 전. 예: 30,10 / 0이면 끔"></label>
+    </div>
     <button class="primary">조사 시작</button>
     <span class="muted">매주 반복하려면 <a href="/schedules">스케줄</a>로 등록하세요</span>
   </form>

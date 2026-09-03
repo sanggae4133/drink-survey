@@ -6,7 +6,7 @@
 import json
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import httpx
@@ -18,6 +18,18 @@ log = logging.getLogger(__name__)
 
 
 KR_WEEKDAYS = "월화수목금토일"
+
+
+def remind_minutes_from_form(raw: str):
+    """폼 입력 → 저장값. 빈칸=None(상속), '0'=끔, '30,10'=지정. 잘못되면 ValueError(메시지 포함)."""
+    raw = (raw or "").strip().replace(" ", "")
+    if not raw:
+        return None
+    try:
+        config.parse_minutes(raw)
+    except ValueError:
+        raise ValueError("리마인더 시점은 '30,10'처럼 쉼표로 구분한 분 단위 숫자거나, 끄려면 0 이어야 합니다")
+    return raw
 
 
 def survey_title(survey) -> str:
@@ -164,7 +176,7 @@ def close_survey(db: sqlite3.Connection, survey_id: int, due_only: bool = True) 
             refresh_prices(db, survey_id)  # 마감 시점 가격으로 확정
             _autofill(db, survey_id)
     if cur.rowcount:
-        announce(db, survey_id, closed=True)
+        announce(db, survey_id, "closed")
 
 
 def _autofill(db: sqlite3.Connection, survey_id: int) -> None:
@@ -231,8 +243,8 @@ def generate_due_surveys(db: sqlite3.Connection) -> None:
     ).fetchall()
     for s in scheds:
         deadline = f"{today_s} {s['deadline_time']}"
-        if now >= deadline:
-            continue  # stale skip
+        if now < f"{today_s} {s['open_time']}" or now >= deadline:
+            continue  # 생성 시각 전 / stale skip
         title = None
         if s["title_pattern"]:
             md = f"{today.month}/{today.day}({KR_WEEKDAYS[weekday]})"  # 9/4(월)
@@ -240,13 +252,49 @@ def generate_due_surveys(db: sqlite3.Connection) -> None:
         with db:
             cur = db.execute(
                 "INSERT OR IGNORE INTO surveys "
-                "(title, survey_date, group_id, cafe_id, deadline_at, allow_guests, schedule_id, created_by) "
-                "VALUES (?,?,?,?,?,?,?,?)",
+                "(title, survey_date, group_id, cafe_id, deadline_at, allow_guests, schedule_id, remind_minutes, created_by) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
                 (title, today_s, s["group_id"], s["cafe_id"], deadline,
-                 s["allow_guests"], s["id"], s["created_by"]),
+                 s["allow_guests"], s["id"], s["remind_minutes"], s["created_by"]),
             )
         if cur.rowcount:
-            announce(db, cur.lastrowid, closed=False)
+            announce(db, cur.lastrowid, "created")
+
+
+def effective_remind_minutes(db: sqlite3.Connection, survey) -> tuple:
+    """조사 → 그룹(가장 가까운 상위 순) → .env 기본값. 첫 번째로 값이 있는 곳을 쓴다."""
+    if survey["remind_minutes"] is not None:
+        return config.parse_minutes(survey["remind_minutes"])
+    g = db.execute("SELECT * FROM groups WHERE id=?", (survey["group_id"],)).fetchone()
+    while g is not None:
+        if g["remind_minutes"] is not None:
+            return config.parse_minutes(g["remind_minutes"])
+        g = (db.execute("SELECT * FROM groups WHERE id=?", (g["parent_group_id"],)).fetchone()
+             if g["parent_group_id"] else None)
+    return config.REMIND_MINUTES
+
+
+def remind_due(db: sqlite3.Connection) -> None:
+    """마감 N분 전 리마인더 (N은 config.REMIND_MINUTES, 기본 30·10).
+
+    reminded_at은 '마지막 리마인더를 보낸 시각'. 어떤 시점(threshold = 마감-N분)에 대해
+    now >= threshold 이고 reminded_at < threshold 이면 아직 그 시점 알림을 안 보낸 것이다.
+    가장 임박한 시점 하나만 보내고(서버가 꺼져 있다 켜져 둘 다 지났으면 한 번만), 그 시점 이전에 존재하던 조사만 대상.
+    """
+    now = datetime.now()
+    rows = db.execute("SELECT * FROM surveys WHERE status='open' AND deadline_at > ?", (now_min(),)).fetchall()
+    for r in rows:
+        deadline = datetime.strptime(r["deadline_at"], "%Y-%m-%d %H:%M")
+        for off in effective_remind_minutes(db, r):  # 오름차순 = 가장 임박한 시점 우선
+            th = (deadline - timedelta(minutes=off)).strftime("%Y-%m-%d %H:%M:%S")
+            if now_str() < th or (r["reminded_at"] or "") >= th or r["created_at"] > th:
+                continue
+            with db:
+                cur = db.execute("UPDATE surveys SET reminded_at=? WHERE id=? AND reminded_at IS ?",
+                                 (now_str(), r["id"], r["reminded_at"]))
+            if cur.rowcount:
+                announce(db, r["id"], "reminder")
+            break
 
 
 def tick() -> None:
@@ -257,6 +305,7 @@ def tick() -> None:
     db = get_conn()
     try:
         generate_due_surveys(db)
+        remind_due(db)
         due = db.execute(
             "SELECT id FROM surveys WHERE status='open' AND deadline_at <= ?", (now_min(),)
         ).fetchall()
@@ -294,21 +343,35 @@ def notify_targets(db: sqlite3.Connection, group_id: int) -> list[str]:
     return out
 
 
-def announce(db: sqlite3.Connection, survey_id: int, closed: bool) -> None:
-    """조사 생성/마감을 그룹 텔레그램에 알린다. 토큰이 없거나 실패해도 본 동작은 영향 없음."""
+def announce(db: sqlite3.Connection, survey_id: int, kind: str) -> int:
+    """조사 생성(created)/리마인더(reminder)/마감(closed)을 그룹 텔레그램에 알린다. 보낸 채팅 수를 반환.
+
+    토큰이 없거나 실패해도 본 동작은 영향 없음. 리마인더는 미응답자가 없으면 보내지 않는다.
+    """
     if not config.TELEGRAM_BOT_TOKEN:
-        return
+        return 0
     s = build_summary(db, survey_id)
     sv = s["survey"]
-    link = f"{config.APP_URL}/surveys/{survey_id}{'/summary' if closed else ''}" if config.APP_URL else ""
-    text = (f"✅ 마감\n{s['copy_text']}" if closed
-            else f"☕ 새 조사 · {survey_title(sv)}\n{sv['cafe_name']} · 마감 {sv['deadline_at']}")
+    link = f"{config.APP_URL}/surveys/{survey_id}{'/summary' if kind == 'closed' else ''}" if config.APP_URL else ""
+    if kind == "closed":
+        text = f"✅ 마감\n{s['copy_text']}"
+    elif kind == "reminder":
+        if not s["excluded"]:
+            return 0
+        left = datetime.strptime(sv["deadline_at"], "%Y-%m-%d %H:%M") - datetime.now()
+        text = (f"⏰ 약 {max(1, round(left.total_seconds() / 60))}분 후 마감 · {survey_title(sv)}\n"
+                f"미응답 {len(s['excluded'])}명: {', '.join(s['excluded'])}")
+    else:
+        text = f"☕ 새 조사 · {survey_title(sv)}\n{sv['cafe_name']} · 마감 {sv['deadline_at']}"
+    sent = 0
     for chat_id in notify_targets(db, sv["group_id"]):
         try:  # ponytail: 동기 전송(요청당 최대 5초). 느려지면 asyncio.to_thread/큐로
             httpx.post(f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage",
                        json={"chat_id": chat_id, "text": f"{text}\n{link}".strip()}, timeout=5)
+            sent += 1
         except httpx.HTTPError as e:
             log.warning("telegram 전송 실패 chat=%s: %s", chat_id, e)
+    return sent
 
 
 # ---------------------------------------------------------------- 집계(주문서)

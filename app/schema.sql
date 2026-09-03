@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS groups (
   name            TEXT NOT NULL UNIQUE,
   parent_group_id INTEGER REFERENCES groups(id),  -- 트리: NULL이면 최상위(본부)
   telegram_chat_id TEXT,                          -- 알림 받을 텔레그램 채팅. NULL이면 상위→하위 순으로 대신 받을 그룹을 찾는다
+  remind_minutes   TEXT,                          -- 리마인더 시점 '30,10'. NULL=상위 그룹→.env 상속, '0'=끔
   created_at      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
@@ -63,6 +64,8 @@ CREATE TABLE IF NOT EXISTS survey_schedules (
   group_id      INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,  -- 그룹/카페 삭제 시 규칙도 함께
   cafe_id       INTEGER NOT NULL REFERENCES cafes(id) ON DELETE CASCADE,
   weekday       INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),  -- 0=월 … 6=일
+  open_time     TEXT NOT NULL DEFAULT '00:00',                     -- 'HH:MM' 이 시각이 지나야 그날 조사를 생성(+생성 알림)
+  remind_minutes TEXT,                                             -- 생성되는 조사에 복사. NULL=상속
   deadline_time TEXT NOT NULL,                                     -- 'HH:MM' (조사 당일 마감 시각)
   allow_guests  INTEGER NOT NULL DEFAULT 0,
   title_pattern TEXT,                                              -- 예: '{M/D} 주간회의' → '9/4(월) 주간회의'
@@ -81,6 +84,9 @@ CREATE TABLE IF NOT EXISTS surveys (
   allow_guests INTEGER NOT NULL DEFAULT 0,
   schedule_id  INTEGER REFERENCES survey_schedules(id) ON DELETE SET NULL,  -- 스케줄 삭제해도 조사(기록)는 남김
   status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+  remind_minutes TEXT,                               -- 이 조사의 리마인더 시점. NULL=그룹→.env 상속, '0'=끔
+  reminded_at  TEXT,                                 -- 마지막 자동 리마인더를 보낸 시각. 시점별 1회 보장용
+  notified_at  TEXT,                                 -- 마지막 수동 알림 시각. 3분에 1회 제한용
   created_by   INTEGER NOT NULL REFERENCES users(id),
   created_at   TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );

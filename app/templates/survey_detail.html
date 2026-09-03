@@ -12,10 +12,16 @@
       onsubmit="return confirm('지금 마감할까요? 미응답자는 기본음료로 자동 채택됩니다.')">
   <button>지금 마감</button>
 </form>
+<form class="inline" method="post" action="/surveys/{{ survey['id'] }}/notify"
+      onsubmit="return confirm('미응답자 목록을 텔레그램으로 지금 보낼까요?')">
+  <button class="ghost" {% if not telegram_on %}disabled title="텔레그램 미설정"{% endif %}
+          title="미응답자 목록을 텔레그램으로 보냅니다. 조사당 3분에 1회">지금 알림 보내기 <span class="muted">(3분에 1회)</span></button>
+</form>
 <form class="inline" method="post" action="/surveys/{{ survey['id'] }}/delete"
       onsubmit="return confirm('이 조사를 삭제할까요? 응답도 모두 삭제되며 되돌릴 수 없습니다.')">
   <button class="ghost muted">조사 삭제</button>
 </form>
+<span class="muted">자동 리마인더: 마감 {{ remind_text }}</span>
 {% endif %}
 
 {% if not is_member %}

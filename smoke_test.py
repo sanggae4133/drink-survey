@@ -17,6 +17,7 @@ os.environ["TELEGRAM_BOT_TOKEN"] = ""
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app import config  # noqa: E402
 from app.db import get_conn, init_db  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -244,10 +245,16 @@ with TestClient(app):
                                 "deadline_time": future, "title_pattern": "{M/D} 주간회의"})
     m1.post("/schedules", data={"group_id": str(team), "cafe_id": str(cafe), "weekday": str(wd),
                                 "deadline_time": past, "title_pattern": "스테일"})
+    m1.post("/schedules", data={"group_id": str(team), "cafe_id": str(cafe), "weekday": str(wd),
+                                "deadline_time": "23:59", "open_time": "23:58", "title_pattern": "아직"})  # 생성 시각 전
+    m1.post("/schedules", data={"group_id": str(team), "cafe_id": str(cafe), "weekday": str(wd),
+                                "deadline_time": "09:00", "open_time": "10:00"})  # 생성 ≥ 마감 → 거절
+    ok(q1("SELECT COUNT(*) n FROM survey_schedules")["n"] == 3, "생성 시각이 마감 이후면 스케줄 등록 거절")
     m1.get("/")
     m1.get("/")  # 두 번 접근해도 한 번만 생성돼야 함
     created = q("SELECT * FROM surveys WHERE schedule_id IS NOT NULL")
-    ok(len(created) == 1, "요일 당일 첫 접속이 조사 생성 (멱등, stale 스케줄은 건너뜀)")
+    ok(len(created) == 1 and created[0]["title"] != "아직",
+       "요일 당일 조사 생성 (멱등, stale·생성 시각 전 스케줄은 건너뜀)")
     now = datetime.now()
     ok(created[0]["title"] == f"{now.month}/{now.day}({'월화수목금토일'[now.weekday()]}) 주간회의",
        "제목 패턴 {M/D} → 월/일(요일) 치환")
@@ -260,6 +267,71 @@ with TestClient(app):
     dbw.close()
     services.tick()  # 사람 접근 없이 스케줄러만으로 마감
     ok(q1("SELECT status s FROM surveys WHERE id=?", created[0]["id"])["s"] == "closed", "tick()이 마감 처리")
+    sent = []
+    real_announce = services.announce
+    services.announce = lambda db, sid, kind: sent.append((sid, kind)) or 1  # 보낸 채팅 1개로 위장
+    m1.post("/surveys", data={"survey_date": today, "deadline_time": deadline, "group_id": str(team),
+                              "cafe_id": str(cafe), "title": "리마인더 조사"})
+    rid = q1("SELECT id FROM surveys WHERE title='리마인더 조사'")["id"]
+    dbw = get_conn()
+    with dbw:  # 마감 20분 전, 조사는 1시간 전에 만들어진 상태로
+        dbw.execute("UPDATE surveys SET deadline_at=?, created_at=? WHERE id=?",
+                    ((datetime.now() + timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M"),
+                     (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S"), rid))
+    dbw.close()
+    services.tick(); services.tick()
+    ok(sent.count((rid, "reminder")) == 1 and q1("SELECT reminded_at r FROM surveys WHERE id=?", rid)["r"],
+       "마감 30분 전 리마인더 — 두 번 tick 해도 한 번만")
+    dbw = get_conn()
+    with dbw:  # 시간이 흘러 마감 5분 전, 30분 전 리마인더는 25분 전에 보낸 상태
+        dbw.execute("UPDATE surveys SET deadline_at=?, reminded_at=? WHERE id=?",
+                    ((datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M"),
+                     (datetime.now() - timedelta(minutes=25)).strftime("%Y-%m-%d %H:%M:%S"), rid))
+    dbw.close()
+    services.tick(); services.tick()
+    ok(sent.count((rid, "reminder")) == 2, "마감 10분 전 리마인더 — 역시 한 번만")
+    # 리마인더 시점 상속: 조사 → 그룹(상위 순) → .env
+    dbx = get_conn()
+    sv = dbx.execute("SELECT * FROM surveys WHERE id=?", (rid,)).fetchone()
+    ok(services.effective_remind_minutes(dbx, sv) == (10, 30), "리마인더 기본값(.env 30,10)")
+    with dbx:
+        dbx.execute("UPDATE groups SET remind_minutes='20' WHERE id=?", (hq,))  # 상위(본부)에만 설정
+    ok(services.effective_remind_minutes(dbx, sv) == (20,), "그룹 설정 없으면 상위 그룹(본부) 설정 상속")
+    with dbx:
+        dbx.execute("UPDATE surveys SET remind_minutes='0' WHERE id=?", (rid,))
+    sv = dbx.execute("SELECT * FROM surveys WHERE id=?", (rid,)).fetchone()
+    ok(services.effective_remind_minutes(dbx, sv) == (), "조사에 0이면 끔 (그룹 설정보다 우선)")
+    with dbx:
+        dbx.execute("UPDATE groups SET remind_minutes=NULL"); dbx.execute("UPDATE surveys SET remind_minutes=NULL WHERE id=?", (rid,))
+    dbx.close()
+    m1.post("/surveys", data={"survey_date": today, "deadline_time": deadline, "group_id": str(team),
+                              "cafe_id": str(cafe), "title": "잘못된 리마인더", "remind_minutes": "abc"})
+    m1.post("/schedules", data={"group_id": str(team), "cafe_id": str(cafe), "weekday": "1",
+                                "deadline_time": "10:30", "open_time": "08:00", "remind_minutes": "15,5"})
+    ok(q1("SELECT COUNT(*) n FROM surveys WHERE title='잘못된 리마인더'")["n"] == 0
+       and q1("SELECT remind_minutes r FROM survey_schedules WHERE weekday=1")["r"] == "15,5",
+       "리마인더 입력 검증(잘못되면 거절), 스케줄에 저장")
+    # 수동 알림
+    sent.clear()
+    m2.post(f"/surveys/{rid}/notify")   # 생성자(m1)·admin 아님
+    ok(sent == [], "수동 알림은 생성자·관리자만")
+    config.TELEGRAM_BOT_TOKEN = "t"
+    r = m1.post(f"/surveys/{rid}/notify", follow_redirects=True)
+    ok(sent == [] and "받을 텔레그램 채팅이 없습니다" in r.text, "수동 알림: chat_id 없는 그룹이면 안내만")
+    dbx = get_conn()
+    with dbx:
+        dbx.execute("UPDATE groups SET telegram_chat_id='team-chat' WHERE id=?", (team,))
+    dbx.close()
+    r = m1.post(f"/surveys/{rid}/notify", follow_redirects=True)
+    ok(sent == [(rid, "reminder")] and "리마인더를 보냈습니다 (1개 채팅)" in r.text, "수동 알림: 생성자가 지금 보내기")
+    r = m1.post(f"/surveys/{rid}/notify", follow_redirects=True)
+    ok(len(sent) == 1 and "3분에 한 번" in r.text, "수동 알림 3분 제한 (연속 호출 거절 + 안내)")
+    dbx = get_conn()
+    with dbx:
+        dbx.execute("UPDATE groups SET telegram_chat_id=NULL")
+    dbx.close()
+    config.TELEGRAM_BOT_TOKEN = ""
+    services.announce = real_announce
     dbx = get_conn()
     with dbx:
         dbx.execute("UPDATE groups SET telegram_chat_id='hq-chat' WHERE id=?", (hq,))

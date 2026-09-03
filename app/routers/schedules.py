@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from .. import services
+from .. import config, services
 from ..db import db_dep
 from ..deps import current_user, flash, render
 
@@ -22,22 +22,32 @@ def schedules_list(request: Request, user: sqlite3.Row = Depends(current_user),
         "ORDER BY s.enabled DESC, s.weekday, s.deadline_time").fetchall()
     groups = db.execute("SELECT * FROM groups ORDER BY name").fetchall()
     cafes = db.execute("SELECT * FROM cafes WHERE is_active=1 ORDER BY name").fetchall()
-    return render(request, "schedules.html", user=user, scheds=scheds,
-                  groups=groups, cafes=cafes, weekdays=services.KR_WEEKDAYS)
+    return render(request, "schedules.html", user=user, scheds=scheds, groups=groups, cafes=cafes,
+                  weekdays=services.KR_WEEKDAYS,
+                  remind_minutes="·".join(str(m) for m in sorted(config.REMIND_MINUTES, reverse=True)) or "(없음)")
 
 
 @router.post("")
 def schedule_create(request: Request, group_id: int = Form(...), cafe_id: int = Form(...),
-                    weekday: int = Form(...), deadline_time: str = Form(...),
-                    title_pattern: str = Form(""), allow_guests: str = Form(""),
+                    weekday: int = Form(...), deadline_time: str = Form(...), open_time: str = Form("00:00"),
+                    title_pattern: str = Form(""), allow_guests: str = Form(""), remind_minutes: str = Form(""),
                     user: sqlite3.Row = Depends(current_user),
                     db: sqlite3.Connection = Depends(db_dep)):
     if not (0 <= weekday <= 6):
         raise HTTPException(400)
     try:
         datetime.strptime(deadline_time, "%H:%M")
+        datetime.strptime(open_time, "%H:%M")
     except ValueError:
-        flash(request, "마감 시각 형식이 잘못됐습니다 (HH:MM)")
+        flash(request, "시각 형식이 잘못됐습니다 (HH:MM)")
+        return RedirectResponse("/schedules", status_code=303)
+    if open_time >= deadline_time:
+        flash(request, "생성 시각은 마감 시각보다 앞이어야 합니다")
+        return RedirectResponse("/schedules", status_code=303)
+    try:
+        remind = services.remind_minutes_from_form(remind_minutes)
+    except ValueError as e:
+        flash(request, str(e))
         return RedirectResponse("/schedules", status_code=303)
     if user["role"] != "admin" and not services.is_effective_member(db, group_id, user["id"]):
         flash(request, "자기가 속한 그룹(또는 그 상위 그룹)에만 스케줄을 걸 수 있습니다")
@@ -46,14 +56,14 @@ def schedule_create(request: Request, group_id: int = Form(...), cafe_id: int = 
         with db:
             db.execute(
                 "INSERT INTO survey_schedules "
-                "(group_id, cafe_id, weekday, deadline_time, allow_guests, title_pattern, created_by) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (group_id, cafe_id, weekday, deadline_time,
-                 1 if allow_guests else 0, title_pattern.strip() or None, user["id"]))
+                "(group_id, cafe_id, weekday, open_time, deadline_time, allow_guests, title_pattern, remind_minutes, created_by) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (group_id, cafe_id, weekday, open_time, deadline_time,
+                 1 if allow_guests else 0, title_pattern.strip() or None, remind, user["id"]))
     except sqlite3.IntegrityError:  # 없는 카페 id 등 (FK)
         flash(request, "그룹 또는 카페를 찾을 수 없습니다")
         return RedirectResponse("/schedules", status_code=303)
-    flash(request, "스케줄이 등록됐습니다. 해당 요일에 첫 접속이 조사를 만듭니다")
+    flash(request, f"스케줄이 등록됐습니다. 매주 {services.KR_WEEKDAYS[weekday]}요일 {open_time}에 조사가 생성되고 {deadline_time}에 마감됩니다")
     return RedirectResponse("/schedules", status_code=303)
 
 

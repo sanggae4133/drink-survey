@@ -112,16 +112,21 @@ def group_create(request: Request, name: str = Form(...), parent_group_id: str =
 
 @router.post("/groups/{gid}")
 def group_update(gid: int, request: Request, name: str = Form(...),
-                 parent_group_id: str = Form(""), telegram_chat_id: str = Form(""),
+                 parent_group_id: str = Form(""), telegram_chat_id: str = Form(""), remind_minutes: str = Form(""),
                  user: sqlite3.Row = Depends(require_admin),
                  db: sqlite3.Connection = Depends(db_dep)):
     parent = int(parent_group_id) if parent_group_id else None
     if services.creates_cycle(db, gid, parent):
         flash(request, "순환 구조는 만들 수 없습니다 (자기 자신/하위 그룹을 상위로 지정 불가)")
         return RedirectResponse("/admin/groups", status_code=303)
+    try:
+        remind = services.remind_minutes_from_form(remind_minutes)
+    except ValueError as e:
+        flash(request, str(e))
+        return RedirectResponse("/admin/groups", status_code=303)
     with db:
-        db.execute("UPDATE groups SET name=?, parent_group_id=?, telegram_chat_id=? WHERE id=?",
-                   (name.strip(), parent, telegram_chat_id.strip() or None, gid))
+        db.execute("UPDATE groups SET name=?, parent_group_id=?, telegram_chat_id=?, remind_minutes=? WHERE id=?",
+                   (name.strip(), parent, telegram_chat_id.strip() or None, remind, gid))
     flash(request, "저장했습니다")
     return RedirectResponse("/admin/groups", status_code=303)
 

@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from .. import models, services
+from .. import config, models, services
 from datetime import datetime, timedelta
 
 from ..db import db_dep, now_min, now_str
@@ -64,16 +64,22 @@ def new_survey(request: Request, user: sqlite3.Row = Depends(current_user),
         "FROM cafes c WHERE c.is_active=1 ORDER BY c.name").fetchall()
     default = datetime.now() + timedelta(hours=1)  # 마감 기본값: 지금부터 1시간 뒤 (자정 넘으면 날짜도 내일)
     return render(request, "survey_new.html", user=user, groups=groups, cafes=cafes, src=src,
-                  today=default.strftime("%Y-%m-%d"), default_time=default.strftime("%H:%M"))
+                  today=default.strftime("%Y-%m-%d"), default_time=default.strftime("%H:%M"),
+                  default_remind=",".join(map(str, sorted(config.REMIND_MINUTES, reverse=True))) or "없음")
 
 
 @router.post("")
 def create_survey(request: Request,
                   survey_date: str = Form(...), deadline_time: str = Form(...),
                   group_id: int = Form(...), cafe_id: int = Form(...),
-                  title: str = Form(""), allow_guests: str = Form(""),
+                  title: str = Form(""), allow_guests: str = Form(""), remind_minutes: str = Form(""),
                   user: sqlite3.Row = Depends(current_user),
                   db: sqlite3.Connection = Depends(db_dep)):
+    try:
+        remind = services.remind_minutes_from_form(remind_minutes)
+    except ValueError as e:
+        flash(request, str(e))
+        return RedirectResponse("/surveys/new", status_code=303)
     menu_count = db.execute(
         "SELECT COUNT(*) AS n FROM menus WHERE cafe_id=? AND is_active=1", (cafe_id,)
     ).fetchone()["n"]
@@ -94,12 +100,12 @@ def create_survey(request: Request,
         return RedirectResponse("/surveys/new", status_code=303)
     with db:
         cur = db.execute(
-            "INSERT INTO surveys (title, survey_date, group_id, cafe_id, deadline_at, allow_guests, created_by) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO surveys (title, survey_date, group_id, cafe_id, deadline_at, allow_guests, remind_minutes, created_by) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             (title.strip() or None, survey_date, group_id, cafe_id, deadline_at,
-             1 if allow_guests else 0, user["id"]))
+             1 if allow_guests else 0, remind, user["id"]))
         sid = cur.lastrowid
-    services.announce(db, sid, closed=False)
+    services.announce(db, sid, "created")
     return RedirectResponse(f"/surveys/{sid}", status_code=303)
 
 
@@ -132,10 +138,13 @@ def survey_detail(sid: int, request: Request, user: sqlite3.Row = Depends(curren
     summary = services.build_summary(db, sid)  # 진행 중 현황 표시에 재사용
     is_member = services.is_effective_member(db, survey["group_id"], user["id"])
 
+    remind = sorted(services.effective_remind_minutes(db, survey), reverse=True)
     return render(request, "survey_detail.html", user=user, survey=survey, menus=menus,
                   fav=fav, my_response=my_response, summary=summary,
                   item_label=models.item_label, json_loads=json.loads,
-                  is_member=is_member, can_manage=_can_manage(user, survey))
+                  is_member=is_member, can_manage=_can_manage(user, survey),
+                  remind_text="·".join(map(str, remind)) + "분 전" if remind else "없음",
+                  telegram_on=bool(config.TELEGRAM_BOT_TOKEN))
 
 
 @router.post("/{sid}/respond")
@@ -277,6 +286,39 @@ def close_survey(sid: int, request: Request, user: sqlite3.Row = Depends(current
         return RedirectResponse(f"/surveys/{sid}", status_code=303)
     services.close_survey(db, sid, due_only=False)
     return RedirectResponse(f"/surveys/{sid}/summary", status_code=303)
+
+
+NOTIFY_COOLDOWN_MIN = 3  # 수동 알림 간격. 템플릿 문구와 같이 바꿀 것
+
+
+@router.post("/{sid}/notify")
+def notify_now(sid: int, request: Request, user: sqlite3.Row = Depends(current_user),
+               db: sqlite3.Connection = Depends(db_dep)):
+    """수동 리마인더: 미응답자 목록을 지금 텔레그램으로. 생성자·관리자만, 조사당 3분에 1회."""
+    survey = _get_survey(db, sid)
+    if not _can_manage(user, survey):
+        flash(request, "조사 생성자나 관리자만 알림을 보낼 수 있습니다")
+    elif survey["status"] != "open":
+        flash(request, "마감된 조사입니다")
+    elif not config.TELEGRAM_BOT_TOKEN:
+        flash(request, "텔레그램이 설정되지 않았습니다 (.env TELEGRAM_BOT_TOKEN)")
+    elif not services.build_summary(db, sid)["excluded"]:
+        flash(request, "미응답자가 없어 보낼 내용이 없습니다")
+    elif not services.notify_targets(db, survey["group_id"]):
+        flash(request, "받을 텔레그램 채팅이 없습니다. 그룹 관리에서 chat_id를 넣으세요")
+    else:
+        limit = (datetime.now() - timedelta(minutes=NOTIFY_COOLDOWN_MIN)).strftime("%Y-%m-%d %H:%M:%S")
+        with db:  # CAS: 3분 안에 이미 보냈으면 rowcount 0
+            cur = db.execute("UPDATE surveys SET notified_at=? WHERE id=? AND (notified_at IS NULL OR notified_at <= ?)",
+                             (now_str(), sid, limit))
+        if not cur.rowcount:
+            last = datetime.strptime(survey["notified_at"], "%Y-%m-%d %H:%M:%S")
+            wait = NOTIFY_COOLDOWN_MIN * 60 - int((datetime.now() - last).total_seconds())
+            flash(request, f"수동 알림은 {NOTIFY_COOLDOWN_MIN}분에 한 번만 보낼 수 있습니다 ({max(wait, 1)}초 후 가능)")
+        else:
+            n = services.announce(db, sid, "reminder")
+            flash(request, f"리마인더를 보냈습니다 ({n}개 채팅)" if n else "전송에 실패했습니다. 서버 로그를 확인하세요")
+    return RedirectResponse(f"/surveys/{sid}", status_code=303)
 
 
 @router.get("/{sid}/summary")
