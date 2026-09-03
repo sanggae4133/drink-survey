@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS user_cafe_defaults (
 
 CREATE TABLE IF NOT EXISTS survey_schedules (
   id            INTEGER PRIMARY KEY,
-  group_id      INTEGER NOT NULL REFERENCES groups(id),
+  group_id      INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,  -- 그룹 삭제 시 규칙도 함께
   cafe_id       INTEGER NOT NULL REFERENCES cafes(id),
   weekday       INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),  -- 0=월 … 6=일
   deadline_time TEXT NOT NULL,                                     -- 'HH:MM' (조사 당일 마감 시각)
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS surveys (
   cafe_id      INTEGER NOT NULL REFERENCES cafes(id),
   deadline_at  TEXT NOT NULL,
   allow_guests INTEGER NOT NULL DEFAULT 0,
-  schedule_id  INTEGER REFERENCES survey_schedules(id),
+  schedule_id  INTEGER REFERENCES survey_schedules(id) ON DELETE SET NULL,  -- 스케줄 삭제해도 조사(기록)는 남김
   status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
   created_by   INTEGER NOT NULL REFERENCES users(id),
   created_at   TEXT NOT NULL DEFAULT (datetime('now','localtime'))

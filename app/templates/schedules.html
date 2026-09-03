@@ -45,6 +45,10 @@
       <form class="inline" method="post" action="/schedules/{{ s['id'] }}/toggle">
         <button class="ghost">{{ '중지' if s['enabled'] else '켜기' }}</button>
       </form>
+      <form class="inline" method="post" action="/schedules/{{ s['id'] }}/delete"
+            onsubmit="return confirm('스케줄을 삭제할까요? 이미 만들어진 조사는 남습니다.')">
+        <button class="ghost muted">삭제</button>
+      </form>
     </td>
   </tr>
   {% endfor %}

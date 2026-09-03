@@ -16,6 +16,18 @@ class OptionGroup(BaseModel):
     choices: List[OptionChoice] = Field(min_length=1, max_length=20)
 
 
+class MenuIn(BaseModel):
+    """가져오기 파일의 메뉴 한 개. 모르는 키는 무시된다."""
+    name: str = Field(min_length=1, max_length=40)
+    base_price: int = Field(ge=0, le=10_000_000)
+    is_active: bool = True
+    options: List[OptionGroup] = Field(default_factory=list, max_length=20)
+
+
+class MenuFile(BaseModel):
+    menus: List[MenuIn] = Field(min_length=1, max_length=100)
+
+
 def parse_option_groups(raw: str) -> List[OptionGroup]:
     """옵션 JSON 문자열 검증. 잘못되면 ValueError(사용자에게 보여줄 메시지)."""
     raw = (raw or "").strip() or "[]"

@@ -3,12 +3,13 @@ import json
 import sqlite3
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import ValidationError
 
 from .. import models
 from ..db import db_dep, now_str
-from ..deps import current_user, flash, render
+from ..deps import current_user, flash, render, require_admin
 
 router = APIRouter(tags=["cafes"])
 
@@ -145,3 +146,65 @@ async def menu_update(mid: int, request: Request, name: str = Form(...),
              1 if is_active else 0, user["id"], now_str(), mid))
     flash(request, f"메뉴 수정됨: {name}")
     return RedirectResponse(f"/cafes/{menu['cafe_id']}", status_code=303)
+
+
+@router.post("/menus/{mid}/delete")
+def menu_delete(mid: int, request: Request, user: sqlite3.Row = Depends(current_user),
+                db: sqlite3.Connection = Depends(db_dep)):
+    menu = db.execute("SELECT cafe_id FROM menus WHERE id=?", (mid,)).fetchone()
+    if menu is None:
+        raise HTTPException(404)
+    try:  # 응답·즐겨찾기·카페 기본음료가 참조 중이면 FK가 막는다
+        with db:
+            db.execute("DELETE FROM menus WHERE id=?", (mid,))
+        flash(request, "메뉴를 삭제했습니다")
+    except sqlite3.IntegrityError:
+        flash(request, "응답·즐겨찾기·기본음료에서 쓰인 메뉴는 삭제할 수 없습니다. 대신 '판매 중'을 꺼 두세요")
+    return RedirectResponse(f"/cafes/{menu['cafe_id']}", status_code=303)
+
+
+# ------------------------------------------------------------------ 내보내기 / 가져오기
+
+@router.get("/cafes/{cid}/export.json")
+def cafe_export(cid: int, user: sqlite3.Row = Depends(current_user),
+                db: sqlite3.Connection = Depends(db_dep)):
+    cafe = db.execute("SELECT * FROM cafes WHERE id=?", (cid,)).fetchone()
+    if cafe is None:
+        raise HTTPException(404)
+    menus = db.execute("SELECT name, base_price, is_active, options FROM menus WHERE cafe_id=? ORDER BY name",
+                       (cid,)).fetchall()
+    body = {"cafe": cafe["name"], "menu_url": cafe["menu_url"],
+            "menus": [{"name": m["name"], "base_price": m["base_price"], "is_active": bool(m["is_active"]),
+                       "options": json.loads(m["options"])} for m in menus]}
+    return JSONResponse(body, headers={"Content-Disposition": f'attachment; filename="cafe-{cid}-menus.json"'})
+
+
+@router.post("/cafes/{cid}/import")
+async def cafe_import(cid: int, request: Request, file: UploadFile = File(...),
+                      user: sqlite3.Row = Depends(require_admin),
+                      db: sqlite3.Connection = Depends(db_dep)):
+    """관리자 전용. 메뉴 이름 기준 upsert만 하고 삭제는 하지 않는다. 형식·개수·범위는 pydantic이 검증."""
+    if db.execute("SELECT 1 FROM cafes WHERE id=?", (cid,)).fetchone() is None:
+        raise HTTPException(404)
+    try:
+        data = models.MenuFile.model_validate(json.loads(await file.read()))  # 본문은 64KB 상한(main.py)
+    except (ValueError, ValidationError) as e:  # json.JSONDecodeError는 ValueError
+        n = len(e.errors()) if isinstance(e, ValidationError) else 1
+        flash(request, f"가져오기 파일 형식이 잘못됐습니다 (오류 {n}건). 내보내기 파일과 같은 형식이어야 합니다")
+        return RedirectResponse(f"/cafes/{cid}", status_code=303)
+    added = updated = 0
+    with db:
+        for m in data.menus:
+            opts = json.dumps([g.model_dump() for g in m.options], ensure_ascii=False)
+            cur = db.execute(
+                "UPDATE menus SET base_price=?, is_active=?, options=?, updated_by=?, updated_at=? "
+                "WHERE cafe_id=? AND name=?",
+                (m.base_price, int(m.is_active), opts, user["id"], now_str(), cid, m.name))
+            if cur.rowcount:
+                updated += 1
+            else:
+                db.execute("INSERT INTO menus (cafe_id, name, base_price, is_active, options, created_by) "
+                           "VALUES (?,?,?,?,?,?)", (cid, m.name, m.base_price, int(m.is_active), opts, user["id"]))
+                added += 1
+    flash(request, f"가져오기 완료: 추가 {added}개, 갱신 {updated}개")
+    return RedirectResponse(f"/cafes/{cid}", status_code=303)

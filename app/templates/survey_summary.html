@@ -57,7 +57,15 @@
   {% endfor %}
 </table>
 </div>
-<p style="margin-top:16px"><a href="/surveys/new?from={{ survey['id'] }}">이 조사와 같게 새로 만들기</a></p>
+<p style="margin-top:16px" class="row">
+  <a href="/surveys/new?from={{ survey['id'] }}">이 조사와 같게 새로 만들기</a>
+  {% if can_manage %}
+  <form class="inline" method="post" action="/surveys/{{ survey['id'] }}/delete"
+        onsubmit="return confirm('이 조사를 삭제할까요? 응답도 모두 삭제되며 되돌릴 수 없습니다.')">
+    <button class="ghost muted">조사 삭제</button>
+  </form>
+  {% endif %}
+</p>
 
 <script>
 function copyOrder(){

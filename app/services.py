@@ -115,6 +115,27 @@ def compute_price(menu: sqlite3.Row, selected: list[dict]) -> int:
     return menu["base_price"] + sum(int(s.get("delta_price", 0)) for s in selected)
 
 
+def refresh_prices(db: sqlite3.Connection, survey_id: int) -> None:
+    """열린 조사의 응답 가격·옵션 증감을 현재 메뉴 기준으로 다시 계산.
+
+    마감 전 메뉴가 수정되면 화면과 주문서가 바로 따라간다. 마감 후에는 부르지 않으므로 그 시점 값이 스냅샷으로 남는다.
+    트랜잭션은 호출자가 잡는다(마감 처리와 한 트랜잭션에 묶이도록).
+    """
+    rows = db.execute(
+        "SELECT r.id AS rid, r.selected_options, r.final_price, m.base_price, m.options "
+        "FROM survey_responses r JOIN menus m ON m.id=r.menu_id WHERE r.survey_id=?", (survey_id,)
+    ).fetchall()
+    for r in rows:
+        current = {g.name: {c.label: c.delta_price for c in g.choices}
+                   for g in models.parse_option_groups(r["options"])}
+        sel = json.loads(r["selected_options"])
+        for s in sel:  # 없어진 옵션은 저장된 증감 유지
+            s["delta_price"] = current.get(s["name"], {}).get(s["choice"], s["delta_price"])
+        price = compute_price(r, sel)
+        db.execute("UPDATE survey_responses SET final_price=?, selected_options=? WHERE id=?",
+                   (price, json.dumps(sel, ensure_ascii=False), r["rid"]))
+
+
 def default_selection(menu: sqlite3.Row) -> list[dict]:
     """필수 옵션 그룹마다 첫 번째 선택지를 고른 기본 선택."""
     groups = models.parse_option_groups(menu["options"])
@@ -140,6 +161,7 @@ def close_survey(db: sqlite3.Connection, survey_id: int, due_only: bool = True) 
             f"UPDATE surveys SET status='closed' WHERE id=? AND status='open'{cond}", args
         )
         if cur.rowcount:
+            refresh_prices(db, survey_id)  # 마감 시점 가격으로 확정
             _autofill(db, survey_id)
     if cur.rowcount:
         announce(db, survey_id, closed=True)

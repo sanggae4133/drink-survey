@@ -57,6 +57,7 @@ async def _harden(request: Request, call_next):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "same-origin"
+    resp.headers["Cache-Control"] = "no-store"  # 뒤로가기 시 옛 화면 방지 + 주문 내역이 브라우저 캐시에 남지 않게
     if not config.DEV_LOGIN:  # 브라우저↔Funnel 구간이 https라 유효
         resp.headers["Strict-Transport-Security"] = "max-age=31536000"
     return resp

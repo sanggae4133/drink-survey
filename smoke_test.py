@@ -126,6 +126,27 @@ with TestClient(app):
                                             "g0_label": ["y"], "g0_price": ["9" * 30]})
     admin.post(f"/cafes/{cafe}/menus", data={"name": "폭주2", "base_price": "9" * 30})
     ok(q1("SELECT COUNT(*) n FROM menus WHERE name LIKE '폭주%'")["n"] == 0, "금액 범위 초과(sqlite 오버플로) 거절")
+    exp = admin.get(f"/cafes/{cafe}/export.json")
+    ok(exp.status_code == 200 and exp.headers["content-disposition"].startswith("attachment")
+       and [m["name"] for m in exp.json()["menus"]] == ["아메리카노", "유자차", "카페라떼"]
+       and exp.json()["menus"][0]["options"][0]["name"] == "온도", "JSON 내보내기")
+    payload = {"menus": [{"name": "유자차", "base_price": 5500}, {"name": "녹차", "base_price": 4000,
+                         "options": [{"name": "온도", "required": True, "choices": [{"label": "HOT"}]}]}]}
+    mem = client_for("m2@t.co")
+    r = mem.post(f"/cafes/{cafe}/import", files={"file": ("m.json", json.dumps(payload).encode(), "application/json")})
+    ok(r.status_code == 403 and q1("SELECT COUNT(*) n FROM menus")["n"] == 3, "가져오기는 관리자만 (member 403)")
+    admin.post(f"/cafes/{cafe}/import", files={"file": ("m.json", b"{bad json", "application/json")})
+    admin.post(f"/cafes/{cafe}/import", files={"file": ("m.json", json.dumps(
+        {"menus": [{"name": "x", "base_price": -1}]}).encode(), "application/json")})
+    ok(q1("SELECT COUNT(*) n FROM menus")["n"] == 3, "깨진 파일·범위 밖 값은 전체 거절")
+    admin.post(f"/cafes/{cafe}/import", files={"file": ("m.json", json.dumps(payload).encode(), "application/json")})
+    ok(q1("SELECT base_price p FROM menus WHERE name='유자차'")["p"] == 5500
+       and q1("SELECT COUNT(*) n FROM menus")["n"] == 4, "가져오기: 이름 같으면 갱신, 없으면 추가, 삭제는 없음")
+    green = q1("SELECT id FROM menus WHERE name='녹차'")["id"]
+    admin.post(f"/menus/{green}/delete")
+    admin.post(f"/menus/{ame}/delete")  # 카페 기본음료로 참조 중
+    ok(q1("SELECT COUNT(*) n FROM menus WHERE id IN (?,?)", green, ame)["n"] == 1,
+       "메뉴 삭제: 참조 없는 건 삭제, 참조(기본음료·응답·즐겨찾기) 있으면 거절")
     ok(q1("SELECT COUNT(*) n FROM menus WHERE name='비대'")["n"] == 0, "옵션 그룹 20개 초과 거절")
     admin.post(f"/menus/{latte}", data={"name": "카페라떼", "base_price": 4600, "is_active": "1", **temp_opt})
     ok(q1("SELECT updated_by u FROM menus WHERE id=?", latte)["u"] == uid["admin@t.co"],
@@ -169,6 +190,10 @@ with TestClient(app):
     ok(len(rows) == 1 and rows[0]["menu_id"] == latte and rows[0]["final_price"] == 4600,
        "1인 1잔 — 재응답은 덮어쓰기(수정된 가격 4600 반영)")
     ok(rows[0]["note"] == "얼음 적게", "기타 요청 저장(trim)")
+    admin.post(f"/menus/{latte}", data={"name": "카페라떼", "base_price": 4700, "is_active": "1", **temp_opt})
+    m1.get(f"/surveys/{sid}")
+    ok(q1("SELECT final_price p FROM survey_responses WHERE survey_id=? AND participant_user_id=?",
+          sid, uid["m1@t.co"])["p"] == 4700, "열린 조사: 메뉴 가격 수정이 응답에 즉시 반영")
 
     m2.post(f"/surveys/{sid}/respond", data={"menu_id": str(ame), "opt_0": "ICE", "save_default": "1",
                                              "note": "덜 달게"})
@@ -205,6 +230,10 @@ with TestClient(app):
     r = m2.get(f"/surveys/{sid}/summary")
     ok(r.status_code == 200 and "합계" in r.text and "자동" in r.text, "주문서(집계+개인별) 렌더")
     ok("* 김선임: 얼음 적게" in r.text, "기타 요청이 복사 텍스트에 포함")
+    admin.post(f"/menus/{latte}", data={"name": "카페라떼", "base_price": 4800, "is_active": "1", **temp_opt})
+    m2.get(f"/surveys/{sid}/summary")
+    ok(q1("SELECT final_price p FROM survey_responses WHERE survey_id=? AND participant_user_id=?",
+          sid, uid["m1@t.co"])["p"] == 4700, "마감 후: 메뉴 가격이 바뀌어도 주문서 금액 고정")
 
     print("== 6. lazy 스케줄 생성 ==")
     fut = datetime.now() + timedelta(hours=1)
@@ -267,5 +296,25 @@ with TestClient(app):
     r = admin.get("/")
     ok(r.headers.get("x-frame-options") == "DENY" and r.headers.get("x-content-type-options") == "nosniff",
        "보안 헤더")
+
+    print("== 9. 조사·스케줄·그룹 삭제 ==")
+    m2.post(f"/surveys/{sid}/delete")
+    ok(q1("SELECT COUNT(*) n FROM surveys WHERE id=?", sid)["n"] == 1, "생성자·관리자가 아니면 조사 삭제 거절")
+    m1.post(f"/surveys/{sid}/delete")
+    ok(q1("SELECT COUNT(*) n FROM surveys WHERE id=?", sid)["n"] == 0
+       and q1("SELECT COUNT(*) n FROM survey_responses WHERE survey_id=?", sid)["n"] == 0,
+       "생성자가 조사 삭제 → 응답도 함께 삭제")
+    sched = q1("SELECT id FROM survey_schedules WHERE title_pattern LIKE '{M/D}%'")["id"]
+    m1.post(f"/schedules/{sched}/delete")
+    ok(q1("SELECT COUNT(*) n FROM survey_schedules WHERE id=?", sched)["n"] == 0
+       and q1("SELECT schedule_id s FROM surveys WHERE id=?", created[0]["id"])["s"] is None,
+       "스케줄 삭제 → 만들어진 조사는 남고 schedule_id만 NULL")
+    admin.post("/schedules", data={"group_id": str(other), "cafe_id": str(cafe), "weekday": "0", "deadline_time": "10:00"})
+    admin.post(f"/admin/groups/{other}/delete")
+    ok(q1("SELECT COUNT(*) n FROM groups WHERE id=?", other)["n"] == 0
+       and q1("SELECT COUNT(*) n FROM survey_schedules WHERE group_id=?", other)["n"] == 0,
+       "그룹 삭제 → 스케줄 CASCADE, 조사 없는 그룹은 삭제됨")
+    admin.post(f"/admin/groups/{team}/delete")  # 조사(자동 생성된 주간회의)가 남아 있음
+    ok(q1("SELECT COUNT(*) n FROM groups WHERE id=?", team)["n"] == 1, "조사(기록)가 남은 그룹은 삭제 거절")
 
     print(f"\nPASS {PASS} checks")

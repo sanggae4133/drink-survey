@@ -59,12 +59,30 @@
       <input name="base_price" type="number" value="{{ m.row['base_price'] }}" required style="width:110px"> 원
       <label class="chk"><input type="checkbox" name="is_active" value="1" {% if m.row['is_active'] %}checked{% endif %}> 판매 중</label>
       <button>수정</button>
+      <button class="ghost muted" form="del-{{ m.row['id'] }}">삭제</button>
       {% if m.row['updated_by'] %}<span class="muted">최근 수정: {{ m.row['updater_name'] }} {{ m.row['updated_at'] }}</span>{% endif %}
     </div>
     {{ opt_editor(m.groups) }}
   </form>
+  <form id="del-{{ m.row['id'] }}" method="post" action="/menus/{{ m.row['id'] }}/delete"
+        onsubmit="return confirm('메뉴를 삭제할까요? 응답이나 즐겨찾기에 쓰인 메뉴는 삭제되지 않습니다.')"></form>
 </div>
 {% endfor %}
+
+<h2>메뉴 내보내기 / 가져오기</h2>
+<div class="card">
+  <div class="row">
+    <a href="/cafes/{{ cafe['id'] }}/export.json"><button type="button">JSON 내보내기</button></a>
+    {% if user['role'] == 'admin' %}
+    <form method="post" action="/cafes/{{ cafe['id'] }}/import" enctype="multipart/form-data" class="row">
+      <input type="file" name="file" accept=".json,application/json" required>
+      <button class="primary">가져오기</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="muted">내보내기 파일을 다른 카페에 그대로 가져올 수 있습니다. 가져오기는 <b>관리자만</b> 가능하고, 메뉴 이름이 같으면 갱신·없으면 추가하며
+    기존 메뉴를 지우지는 않습니다. 파일은 64KB·메뉴 100개까지, 형식이 어긋나면 전체가 거절됩니다.</p>
+</div>
 
 <h2>메뉴 추가</h2>
 <div class="card">

@@ -24,7 +24,7 @@ bash run.sh                             # http://127.0.0.1:8080  (uvicorn app.ma
 ## 스모크 테스트
 
 ```bash
-python smoke_test.py        # 44개 체크: 로그인·트리·응답·게스트·lazy 마감·자동 채택·스케줄
+python smoke_test.py        # 56개 체크: 로그인·트리·응답·게스트·lazy 마감·자동 채택·스케줄
 ```
 
 ## 구조
@@ -57,7 +57,8 @@ seed.py              초기 관리자·데모 데이터
 - **주간 조사 생성**: 스케줄 요일 0시 첫 tick이 그 주 조사를 만든다. 멱등성은 `UNIQUE(schedule_id, survey_date)`가 보장.
 - **텔레그램 알림**(선택): 조사 생성·마감 때 그룹 채팅으로. chat_id 없는 그룹은 가장 가까운 상위 → 없으면 하위 그룹으로.
 - **1인 1잔**: 재응답은 덮어쓰기. 게스트 잔은 `allow_guests`일 때 누구나 추가(추가자 표시).
-- **가격 스냅샷**: 응답 시점 가격을 `final_price`에 저장 → 이후 메뉴 가격이 바뀌어도 과거 조사 금액 보존.
+- **가격 확정 시점 = 마감**: 열린 조사는 메뉴를 고치면 응답 금액이 바로 따라가고, 마감 순간의 값이 `final_price`로 고정된다.
+- **메뉴 JSON 내보내기/가져오기**: 카페 간 복사용. 가져오기는 관리자만, 이름 기준 갱신·추가만(삭제 없음), pydantic 검증.
 
 ## 운영 배포 (라즈베리파이 + Tailscale)
 
@@ -112,6 +113,16 @@ sudo tailscale funnel --bg 8080
 1. 텔레그램 @BotFather → `/newbot` → 토큰을 `.env`의 `TELEGRAM_BOT_TOKEN`에.
 2. 봇을 부서 그룹 채팅에 초대. chat_id는 `https://api.telegram.org/bot<토큰>/getUpdates` 응답의 `chat.id`(그룹은 음수).
 3. 관리자 → 그룹 관리에서 해당 그룹에 chat_id 입력. `APP_URL`을 Funnel 주소로 넣으면 메시지에 링크가 붙는다.
+
+### 업데이트 (스키마가 바뀐 버전으로 올릴 때)
+```bash
+sudo systemctl stop drink-survey
+git pull
+python migrate.py --dry-run     # 무엇이 바뀌는지 확인
+python migrate.py               # <DB>.bak-<시각> 백업 후 schema.sql 기준으로 재구성. 실패하면 자동 롤백
+sudo systemctl start drink-survey
+```
+`migrate.py`는 멱등이라 스키마 변경이 없는 업데이트에 돌려도 무해하다. 컬럼 추가·제약 변경은 전부 `schema.sql`만 고치면 따라온다.
 
 ### 백업
 SQLite 파일 하나이므로 백업은 `cp drink_survey.db 백업위치` (또는 `sqlite3 .backup`). cron으로 하루 1회 NAS에 복사 권장.

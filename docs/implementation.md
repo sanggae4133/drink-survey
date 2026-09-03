@@ -11,7 +11,7 @@ app/
   config.py        환경변수 → 상수. OAUTH_CONFIGURED = client id/secret 둘 다 있을 때
   db.py            get_conn() / init_db() / db_dep() / now_str() / now_min()
   schema.sql       DDL 원본. CREATE ... IF NOT EXISTS 라 매 기동마다 실행해도 안전
-  models.py        OptionGroup·OptionChoice(pydantic), parse_option_groups(), item_label()
+  models.py        OptionGroup·OptionChoice·MenuIn·MenuFile(pydantic), parse_option_groups(), item_label()
   services.py      도메인 로직 (아래 표)
   deps.py          current_user / require_admin / flash / render
   routers/
@@ -24,6 +24,7 @@ app/
     admin.py       /admin/users*, /admin/groups*
   templates/       base.html + 화면당 1개. CSS는 base.html 안 <style> 한 덩어리
 seed.py            관리자 upsert (+ --demo 예시 데이터)
+migrate.py         기존 DB를 schema.sql 기준으로 재구성 (백업 → 재구성 → FK 검사, 실패 시 롤백). 멱등
 smoke_test.py      TestClient로 전체 플로우 22 체크. 서버 불필요
 run.sh             .env 로드 후 uvicorn
 ```
@@ -38,6 +39,7 @@ run.sh             .env 로드 후 uvicorn
 | `creates_cycle(db, gid, new_parent)` | new_parent가 gid 자신·자손이면 True | 그룹 상위 변경 |
 | `group_tree(db)` | `[{row, depth}]` 트리 순서 평탄화 | 그룹 관리 화면 |
 | `compute_price(menu, sel)` | `base_price + Σ delta_price` | 응답, 게스트, 자동 채택 |
+| `refresh_prices(db, sid)` | 열린 조사 응답의 가격·증감을 현재 메뉴로 재계산. 트랜잭션은 호출자 | 상세·주문서(open), `close_survey` 직전 |
 | `default_selection(menu)` | 필수 옵션 그룹마다 첫 선택지 | 게스트 잔, 카페 기본음료 자동 채택 |
 | `close_survey(db, sid, due_only=True)` | CAS로 closed 전환, 성공 시 `_autofill` + `announce`. `due_only=False`면 수동 즉시 마감 | tick, 홈·상세·응답·게스트·주문서 진입, 수동 마감 |
 | `_autofill(db, sid)` | 미응답 active 멤버에 즐겨찾기 → 기본음료 → 제외 순으로 `is_auto=1` 응답 INSERT | `close_survey` 안에서만 |
@@ -66,13 +68,18 @@ run.sh             .env 로드 후 uvicorn
 | POST `/surveys/{id}/guests` | 유효 멤버, allow_guests | `guest_menu_id` + 필수 옵션 기본값으로 INSERT | `/surveys/{id}` |
 | POST `/surveys/{id}/guests/{rid}/delete` | 추가자·생성자·admin, open | DELETE | `/surveys/{id}` |
 | POST `/surveys/{id}/close` | 생성자·admin | `close_survey(due_only=False)` | `/summary` |
+| POST `/surveys/{id}/delete` | 생성자·admin | DELETE (응답 CASCADE) | `/` |
 | GET `/surveys/{id}/summary` | 로그인 | lazy 마감 → `build_summary`. open이면 "진행 중" 배지 | |
 | GET/POST `/cafes` | 로그인 | 목록 / 등록. `menu_url`은 http(s)만 | `/cafes/{id}` |
 | GET/POST `/cafes/{id}` | 로그인 | 상세·메뉴 목록 / 이름·링크·기본음료 수정 | |
 | POST `/cafes/{id}/menus` | 로그인 | 옵션 UI 필드 → JSON 조립·검증 후 INSERT | `/cafes/{id}` |
 | POST `/menus/{id}` | 로그인 | 같은 조립·검증 후 UPDATE + updated_by/at | `/cafes/{cafe}` |
+| POST `/menus/{id}/delete` | 로그인 | DELETE. FK 위반(응답·즐겨찾기·기본음료)이면 flash | `/cafes/{cafe}` |
+| GET `/cafes/{id}/export.json` | 로그인 | 메뉴 전체 JSON(attachment) | |
+| POST `/cafes/{id}/import` | admin | multipart 파일 → `MenuFile` 검증 → 이름 기준 upsert. 삭제 없음 | `/cafes/{id}` |
 | GET/POST `/schedules` | 로그인 / 대상 그룹 유효 멤버 또는 admin | 목록 / 등록 | |
 | POST `/schedules/{id}/toggle` | 생성자·admin | enabled 반전 | |
+| POST `/schedules/{id}/delete` | 생성자·admin | DELETE (조사의 schedule_id는 SET NULL) | |
 | GET `/me` | 로그인 | 내 즐겨찾기 목록 | |
 | POST `/me/defaults/{cafe_id}/delete` | 본인 | DELETE | `/me` |
 | GET/POST `/admin/users` | admin | 목록 / 사전 등록 | |
@@ -81,7 +88,7 @@ run.sh             .env 로드 후 uvicorn
 | GET/POST `/admin/groups` | admin | 트리 + 멤버 체크박스 / 그룹 생성 | |
 | POST `/admin/groups/{id}` | admin | 이름·상위·텔레그램 chat_id 변경. `creates_cycle`이면 거절 | |
 | POST `/admin/groups/{id}/members` | admin | 직속 멤버 전체 교체 (DELETE 후 INSERT) | |
-| POST `/admin/groups/{id}/delete` | admin | DELETE. FK 위반(`IntegrityError`)이면 flash로 거절 | |
+| POST `/admin/groups/{id}/delete` | admin | DELETE (소속·스케줄 CASCADE). 하위 그룹·조사 FK 위반이면 flash로 거절 | |
 
 권한 실패 처리 방식이 두 가지다. **접근 자체가 잘못된 것**(비로그인, 비관리자, 없는 id)은 303/403/404,
 **규칙 위반**(멤버 아님, 마감됨, 순환)은 flash 메시지 + 원래 화면으로 303. 사용자가 고칠 수 있는 건 후자로 처리한다.
@@ -133,7 +140,7 @@ run.sh             .env 로드 후 uvicorn
 DEV_LOGIN=1 python smoke_test.py
 ```
 
-- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 44 체크, 약 1초.
+- 임시 디렉터리에 새 DB를 만들고 `TestClient`로 전 플로우를 순서대로 밟는다. 56 체크, 약 1초.
 - 단위 테스트 프레임워크 없음. `ok(cond, msg)` 하나. 실패하면 첫 실패에서 `AssertionError`로 멈춘다.
 - 시간 의존 테스트(마감, 스케줄)는 DB의 `deadline_at`을 직접 과거로 UPDATE해서 트리거한다.
 - 구글 OAuth 콜백은 테스트 안 함. dev 로그인이 같은 `invited→active` 경로를 탄다.
@@ -144,7 +151,7 @@ DEV_LOGIN=1 python smoke_test.py
 
 | 하려는 것 | 고칠 곳 |
 |---|---|
-| 컬럼 추가 | `schema.sql`에 `CREATE TABLE`(신규 설치용) + 기존 DB용 `ALTER TABLE` 스크립트를 별도로. `IF NOT EXISTS`는 컬럼 추가를 못 한다 |
+| 컬럼 추가·제약 변경 | `schema.sql`만 고친다. 기존 DB는 `python migrate.py`가 schema.sql 기준으로 테이블을 재구성(공통 컬럼 복사)해 따라온다. 컬럼 이름 변경은 미지원(추가+삭제로 보임) → 그때는 migrate.py에 한 줄 |
 | 자동 채택 우선순위 변경 | `services._autofill` |
 | 홈 정렬·노출 조건 | `routers/home.py` SQL. 현재: 진행 중은 그룹명 → 날짜, 지난 건 최신 10개 |
 | 주문서 텍스트 포맷 | `services.build_summary`의 `lines` |
@@ -159,6 +166,7 @@ DEV_LOGIN=1 python smoke_test.py
 
 - `is_effective_member`는 멤버 전체를 가져와 검사한다. 그룹이 수백 명이 되면 `WHERE u.id=?` 쿼리로 바꿀 것.
 - 동시에 두 요청이 같은 사람의 첫 응답을 넣으면 한쪽이 UNIQUE 위반으로 500. `INSERT ... ON CONFLICT DO UPDATE`로 바꾸면 해결.
-- 스키마 마이그레이션 도구 없음. 첫 `ALTER`가 필요해질 때 `migrations/` 디렉터리와 버전 테이블을 그때 만든다.
+- 마이그레이션은 버전 파일 없이 `migrate.py`가 "현재 schema.sql = 정답"으로 전체 테이블을 재구성한다. 컬럼 이름 변경이나 타입 변환처럼
+  공통 컬럼 복사로 표현되지 않는 변경은 `migrate.py`에 직접 한 줄 넣어야 한다(JSON `delta`→`delta_price`가 그 예).
 - 스케줄러는 uvicorn 워커 1개 전제. 워커를 늘리면 tick이 워커 수만큼 돌지만 SQL 제약 덕에 결과는 같고 알림만 중복될 수 있다.
 - 텔레그램 전송이 요청 안에서 동기로 일어난다(최대 5초 × 채팅 수). 느려지면 `asyncio.to_thread`나 큐로.

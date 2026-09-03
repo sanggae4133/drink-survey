@@ -47,7 +47,10 @@ DDL은 `app/schema.sql` 하나가 원본이다. 여기서는 제약이 담당하
 | `users.role CHECK`, `users.status CHECK`, `surveys.status CHECK` | 열거값 |
 | `groups.name UNIQUE` | 그룹 이름 충돌 방지 |
 | `groups.parent_group_id → groups(id)` (CASCADE 없음) | 하위 그룹이 있는 그룹은 삭제 불가 |
-| `surveys.group_id`, `survey_schedules.group_id` FK (CASCADE 없음) | 조사·스케줄이 참조하는 그룹은 삭제 불가 |
+| `surveys.group_id` FK (CASCADE 없음) | 조사(기록)가 남은 그룹은 삭제 불가. 조사를 먼저 지워야 한다 |
+| `survey_schedules.group_id` ON DELETE CASCADE | 그룹을 지우면 그 그룹의 반복 규칙도 함께 |
+| `surveys.schedule_id` ON DELETE SET NULL | 스케줄을 지워도 이미 만들어진 조사는 남는다 |
+| `survey_responses.survey_id` ON DELETE CASCADE | 조사를 지우면 응답도 함께 |
 | `group_members` ON DELETE CASCADE | 회원·그룹 삭제 시 소속 자동 정리 |
 | `uq_surveys_schedule_date (schedule_id, survey_date) WHERE schedule_id IS NOT NULL` | 스케줄 자동 생성 멱등성 |
 | `uq_responses_participant (survey_id, participant_user_id) WHERE participant_user_id IS NOT NULL` | 1인 1잔. 게스트 잔은 제한 없음 |
@@ -122,7 +125,8 @@ tick(1분) 또는 홈 접속 ──▶ 오늘 요일과 일치하는 enabled 스
 - 정상 운영에서는 0시 직후 tick이 만든다. 아무도 응답하지 않아도 마감 때 자동 채택된 주문서가 나온다 — 그게 의도다.
 - stale skip은 앱이 하루 내내 꺼져 있다가 마감 후 켜진 경우의 방어. 그때 조사를 만들면 즉시 닫히고 전원 자동 채택된 "유령 주문서"가 생긴다.
 - `title_pattern`의 `{M/D}`는 `9/4(월)` 같은 오늘 날짜(요일)로 치환. 비우면 제목 NULL → 화면에서 `2026-09-07(월) 시스템1팀`처럼 표시(`services.survey_title`).
-- 스케줄은 삭제하지 않고 `enabled` 토글만 한다. 과거 조사가 `schedule_id`로 참조하기 때문.
+- 스케줄은 `enabled` 토글로 잠시 멈추거나, 삭제할 수 있다(생성자·관리자). 삭제해도 과거 조사는 남는다(`schedule_id`만 NULL).
+- 조사 삭제는 생성자·관리자. 응답도 함께 지워지며 되돌릴 수 없다. 잘못 만든 조사를 치우는 용도.
 
 ### R5. 1인 1잔, 게스트 잔은 별도
 
@@ -131,11 +135,21 @@ tick(1분) 또는 홈 접속 ──▶ 오늘 요일과 일치하는 enabled 스
 - 게스트 잔 옵션은 **필수 옵션 기본값**으로 고정된다(선택 UI 없음). 세부 옵션이 필요하면 본인 잔으로 응답하라는 방침.
 - 게스트 잔 삭제 권한: 추가한 사람, 조사 생성자, 관리자. 마감 후에는 불가.
 
-### R6. 가격은 응답 시점 스냅샷
+### R6. 가격은 마감 시점에 확정
 
-`survey_responses.final_price` = 응답 시점의 `base_price + Σ delta_price`. `selected_options`도 라벨·delta_price를 통째로 저장.
-이후 메뉴 가격이나 옵션이 바뀌어도 과거 주문서 금액은 변하지 않는다.
-즐겨찾기(`user_cafe_defaults.selected_options`)도 스냅샷이지만, 자동 채택 시 가격은 **그 시점 메뉴 기준으로 재계산**한다.
+주문은 마감 후에 하니 금액도 마감 시점 메뉴 기준이어야 한다.
+- **열린 조사**: 상세·주문서 화면을 열 때 `refresh_prices`가 모든 응답의 `final_price`와 옵션 증감을 현재 메뉴로 다시 계산한다.
+  메뉴를 고치면 다음 화면에서 바로 반영된다. 없어진 옵션 선택지는 저장된 증감을 그대로 둔다.
+- **마감**: `close_survey`가 닫기 직전에 한 번 더 `refresh_prices`를 돌리고, 그 뒤로는 부르지 않는다. 그 값이 스냅샷으로 남아
+  이후 메뉴 가격이 바뀌어도 과거 주문서는 변하지 않는다.
+- 즐겨찾기의 `selected_options`는 라벨 기준이라 자동 채택 때도 현재 메뉴 가격으로 계산된다.
+
+### R9. 메뉴 JSON 내보내기/가져오기는 "관리자·갱신·추가만"
+
+- 내보내기(`/cafes/{id}/export.json`)는 로그인 사용자 누구나. 화면에서 보이는 정보 그대로다.
+- 가져오기는 **관리자만**. 메뉴 이름 기준으로 있으면 갱신, 없으면 추가. **삭제는 절대 하지 않는다** — 잘못 올려도 잃는 게 없게.
+- 파일은 pydantic(`MenuFile`)이 통째로 검증: 메뉴 100개, 이름 40자, 가격 0~1000만, 옵션은 R6과 같은 규칙. 하나라도 어긋나면 전체 거절.
+  본문 64KB 상한은 미들웨어가, 파일명·Content-Type은 신뢰하지 않고 내용만 본다.
 
 ### R8. 텔레그램 알림은 "가장 가까운 한 채팅"
 
@@ -147,7 +161,7 @@ tick(1분) 또는 홈 접속 ──▶ 오늘 요일과 일치하는 enabled 스
 ### R7. 카페·메뉴는 위키 모델
 
 누구나 등록·수정. 대신 `menus.updated_by/updated_at`을 남겨 화면에 "최근 수정: 누가 언제"를 보여준다.
-삭제는 없고 `is_active=0`(판매 중지). 과거 응답이 참조하기 때문.
+삭제는 응답·즐겨찾기·카페 기본음료 어디서도 참조하지 않는 메뉴만 가능(FK가 막고, 막히면 안내). 쓰인 메뉴는 `is_active=0`(판매 중지).
 카페 공통 기본음료는 그 카페의 `is_active` 메뉴만 지정 가능.
 
 ## 메뉴 옵션 JSON (저장 형식)
@@ -201,7 +215,7 @@ tick(1분) 또는 홈 접속 ──▶ 오늘 요일과 일치하는 enabled 스
 | 옵션 테이블 정규화 | 옵션으로 조회·집계하지 않음. JSON 컬럼 + pydantic 검증이 더 짧다 |
 | 사용자 자기 가입 + 승인 | 사전 등록이 곧 승인. 화면·상태 하나씩 줄어듦 |
 | 게스트 잔 옵션 선택 UI | 요구 없음. 필요해지면 `respond`의 `_parse_selection`을 재사용하면 됨 |
-| 조사 삭제 | 주문서는 기록. 잘못 만들면 마감하면 끝 |
+| 가져오기로 메뉴 전체 교체(삭제 포함) | 실수 한 번에 과거 응답이 참조하는 메뉴가 사라짐. 갱신·추가만이 안전 |
 
 ## v2 후보 (README와 동일)
 

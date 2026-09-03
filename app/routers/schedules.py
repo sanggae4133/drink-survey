@@ -57,6 +57,22 @@ def schedule_create(request: Request, group_id: int = Form(...), cafe_id: int = 
     return RedirectResponse("/schedules", status_code=303)
 
 
+@router.post("/{sid}/delete")
+def schedule_delete(sid: int, request: Request, user: sqlite3.Row = Depends(current_user),
+                    db: sqlite3.Connection = Depends(db_dep)):
+    """이미 만들어진 조사는 남는다(schedule_id만 NULL)."""
+    s = db.execute("SELECT * FROM survey_schedules WHERE id=?", (sid,)).fetchone()
+    if s is None:
+        raise HTTPException(404)
+    if user["id"] != s["created_by"] and user["role"] != "admin":
+        flash(request, "스케줄 생성자나 관리자만 삭제할 수 있습니다")
+    else:
+        with db:
+            db.execute("DELETE FROM survey_schedules WHERE id=?", (sid,))
+        flash(request, "스케줄을 삭제했습니다. 이미 만들어진 조사는 그대로 남습니다")
+    return RedirectResponse("/schedules", status_code=303)
+
+
 @router.post("/{sid}/toggle")
 def schedule_toggle(sid: int, request: Request, user: sqlite3.Row = Depends(current_user),
                     db: sqlite3.Connection = Depends(db_dep)):

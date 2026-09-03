@@ -124,6 +124,8 @@ def survey_detail(sid: int, request: Request, user: sqlite3.Row = Depends(curren
     if fav:  # 즐겨찾기 메뉴를 맨 위로
         menus.sort(key=lambda m: 0 if m["row"]["id"] == fav["menu_id"] else 1)
 
+    with db:
+        services.refresh_prices(db, sid)  # 열린 조사: 현재 메뉴 가격 반영
     my_response = db.execute(
         "SELECT r.*, m.name AS menu_name FROM survey_responses r JOIN menus m ON m.id=r.menu_id "
         "WHERE r.survey_id=? AND r.participant_user_id=?", (sid, user["id"])).fetchone()
@@ -250,7 +252,21 @@ def delete_guest(sid: int, rid: int, request: Request,
     return RedirectResponse(f"/surveys/{sid}", status_code=303)
 
 
-# ------------------------------------------------------------------ 마감/주문서
+# ------------------------------------------------------------------ 마감/주문서/삭제
+
+@router.post("/{sid}/delete")
+def delete_survey(sid: int, request: Request, user: sqlite3.Row = Depends(current_user),
+                  db: sqlite3.Connection = Depends(db_dep)):
+    """응답도 함께 삭제(ON DELETE CASCADE). 생성자·관리자만."""
+    survey = _get_survey(db, sid)
+    if not _can_manage(user, survey):
+        flash(request, "조사 생성자나 관리자만 삭제할 수 있습니다")
+        return RedirectResponse(f"/surveys/{sid}", status_code=303)
+    with db:
+        db.execute("DELETE FROM surveys WHERE id=?", (sid,))
+    flash(request, f"조사를 삭제했습니다: {services.survey_title(survey)}")
+    return RedirectResponse("/", status_code=303)
+
 
 @router.post("/{sid}/close")
 def close_survey(sid: int, request: Request, user: sqlite3.Row = Depends(current_user),
@@ -268,6 +284,9 @@ def survey_summary(sid: int, request: Request, user: sqlite3.Row = Depends(curre
                    db: sqlite3.Connection = Depends(db_dep)):
     services.close_survey(db, sid)
     survey = _get_survey(db, sid)
+    if survey["status"] == "open":
+        with db:
+            services.refresh_prices(db, sid)
     summary = services.build_summary(db, sid)
     return render(request, "survey_summary.html", user=user, survey=survey, s=summary,
-                  interim=(survey["status"] == "open"))
+                  interim=(survey["status"] == "open"), can_manage=_can_manage(user, survey))

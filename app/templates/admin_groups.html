@@ -51,7 +51,7 @@
     </div>
   </form>
   <form method="post" action="/admin/groups/{{ g['id'] }}/delete"
-        onsubmit="return confirm('그룹을 삭제할까요?')" class="inline">
+        onsubmit="return confirm('그룹을 삭제할까요? 소속 정보와 이 그룹의 반복 스케줄도 함께 삭제됩니다.')" class="inline">
     <button class="ghost muted">그룹 삭제</button>
   </form>
 </div>
