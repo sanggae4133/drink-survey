@@ -7,6 +7,7 @@ import json
 import logging
 import sqlite3
 from datetime import datetime
+from typing import Optional
 
 import httpx
 
@@ -71,7 +72,7 @@ def user_visible_group_ids(db: sqlite3.Connection, user_id: int) -> list[int]:
     return [r["id"] for r in rows]
 
 
-def creates_cycle(db: sqlite3.Connection, group_id: int, new_parent_id: int | None) -> bool:
+def creates_cycle(db: sqlite3.Connection, group_id: int, new_parent_id: Optional[int]) -> bool:
     """group_id의 상위를 new_parent_id로 바꿀 때 순환이 생기는지.
 
     새 상위가 자기 자신이거나 자기 자손이면 순환이다.
@@ -94,7 +95,7 @@ def creates_cycle(db: sqlite3.Connection, group_id: int, new_parent_id: int | No
 def group_tree(db: sqlite3.Connection) -> list[dict]:
     """트리 순서/깊이가 붙은 평탄화 리스트 (관리 화면 표시용)."""
     rows = db.execute("SELECT * FROM groups ORDER BY name").fetchall()
-    children: dict[int | None, list[sqlite3.Row]] = {}
+    children: dict[Optional[int], list[sqlite3.Row]] = {}
     for r in rows:
         children.setdefault(r["parent_group_id"], []).append(r)
     out: list[dict] = []

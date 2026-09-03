@@ -1,6 +1,7 @@
 """카페·메뉴: 누구나 등록/수정. 메뉴 수정은 updated_by/updated_at 기록."""
 import json
 import sqlite3
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -32,7 +33,7 @@ def _options_from_form(form) -> str:
     return json.dumps([g.model_dump() for g in validated], ensure_ascii=False)  # 정규화된 형태로 저장
 
 
-def _url(raw: str) -> str | None:
+def _url(raw: str) -> Optional[str]:
     """빈 값은 None. http(s)만 허용 — 'javascript:' 링크를 다른 사용자가 클릭하게 만드는 XSS 차단."""
     u = raw.strip()
     if u and not u.startswith(("http://", "https://")):

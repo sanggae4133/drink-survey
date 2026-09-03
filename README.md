@@ -5,6 +5,8 @@
 
 ## 빠른 시작 (로컬/개발)
 
+Python **3.9 이상** (RHEL 기본 3.9에서 동작 확인).
+
 ```bash
 # 파이썬 가상환경 설정
 python3 -m venv .venv

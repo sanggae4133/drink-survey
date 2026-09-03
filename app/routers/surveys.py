@@ -1,6 +1,7 @@
 """조사: 생성/상세/응답/게스트/마감/복제/주문서."""
 import json
 import sqlite3
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -24,7 +25,7 @@ def _get_survey(db, sid: int) -> sqlite3.Row:
     return s
 
 
-def _note(form) -> str | None:
+def _note(form) -> Optional[str]:
     """기타 요청(서술형). 100자로 자른다 — 주문서에 한 줄로 들어가야 하니."""
     return (form.get("note") or "").strip()[:100] or None
 

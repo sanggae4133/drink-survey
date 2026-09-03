@@ -71,7 +71,8 @@ with TestClient(app):
     admin.post("/admin/users", data={"email": "evil@t.co", "name": "x'); alert(1); ('", "role": "member"})
     h = admin.get("/admin/users").text
     ok("confirm('x" not in h and "alert(1); ('" not in h, "회원 이름이 JS 문자열로 새지 않음 (confirm XSS)")
-    admin.post(f"/admin/users/{q1("SELECT id FROM users WHERE email='evil@t.co'")['id']}/toggle")
+    evil = q1("SELECT id FROM users WHERE email='evil@t.co'")["id"]
+    admin.post(f"/admin/users/{evil}/toggle")
 
     print("== 2. 그룹 트리 ==")
     admin.post("/admin/groups", data={"name": "코어개발본부", "parent_group_id": ""})
@@ -94,7 +95,8 @@ with TestClient(app):
     ok(len(eff) == 5, f"본부 유효 멤버 = 직속 1 + 팀 4 = {len(eff)}")
     admin.post(f"/admin/groups/{hq}/delete")
     admin.post("/admin/groups", data={"name": "빈그룹", "parent_group_id": ""})
-    admin.post(f"/admin/groups/{q1("SELECT id FROM groups WHERE name='빈그룹'")['id']}/delete")
+    empty = q1("SELECT id FROM groups WHERE name='빈그룹'")["id"]
+    admin.post(f"/admin/groups/{empty}/delete")
     ok(q1("SELECT COUNT(*) n FROM groups")["n"] == 2, "하위 그룹 있는 그룹 삭제 거절(FK), 빈 그룹은 삭제")
 
     print("== 3. 카페·메뉴 ==")
